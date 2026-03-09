@@ -1,37 +1,43 @@
-# **ESP32-S3 Pentesting Workflows**
+# **ESP32-S3 Pentesting Workflows (LVGL High-Perf Edition)**
 
-This guide outlines the standard operating procedures for conducting wireless security audits using your 2.8" ESP32-S3 device.
+This guide outlines the standard operating procedures for conducting wireless security audits using your upgraded ESP32-S3 suite.
 
 ## **Workflow 1: Initial Reconnaissance (Passive)**
 
-The goal is to map the local 2.4GHz environment without transmitting any packets.
+Map the local environment without transmitting any frames.
 
-1. **Power On:** The device automatically enters the **PENTEST SCAN** tab.  
-2. **Environmental Audit:** Observe the "PENTESTING AIRWAVES" status. The device is currently performing a passive scan.  
-3. **Signal Analysis:** Look for networks with high RSSI values (closest to 0dBm). These are your primary targets due to signal proximity.  
-4. **Security Filtering:** Identify "OPEN" vs "SECURE" networks. Focus on networks using older protocols or weak configurations.
+1. **Power On:** The device enters the **Home Hub**. Tap the **SCAN** icon.  
+2. **Environment Audit:** Tap the **START** button in the footer. The WiFi icon in the status bar will turn cyan (0x00FFCC).  
+3. **Signal Analysis:** Observe the scan list. Tap **APs** for access points, **STAs** for clients, or **Linked** to see which clients are talking to which routers.  
+4. **Security Filtering:** Check the encryption labels (OPEN, WPA2, etc.) and RSSI bars to identify the strongest, most vulnerable targets.
 
-## **Workflow 2: Targeted Deauthentication Audit**
+## **Workflow 2: Targeted Handshake Audit (PMKID)**
 
-Used to test a client's ability to reconnect or to capture handshakes on an external machine.
+Capture security data to test WPA2 PSK strength.
 
-1. **Selection:** In the **PENTEST SCAN** tab, tap the specific SSID you wish to audit. The entry will highlight in cyan.  
-2. **Module Switch:** Tap the **ATK** button in the header.  
-3. **Engagement:** Verify the "TARGET ACQUIRED" information matches your intended BSSID.  
-4. **Execution:** Tap **DEAUTH TARGET**. The device begins sending deauthentication frames to the target AP, effectively testing the connection's resilience.
+1. **Selection:** In the **Scan** tab, tap a target SSID. It will highlight, and the device will automatically switch to the **Pentest** tab.  
+2. **Setup:** Verify the SSID and BSSID match your target.  
+3. **Execution:** Tap **PMKID CAPTURE**. The WiFi icon turns blue. The device will now wait for a client to associate to capture the PMKID handshake.  
+4. **Completion:** Once captured, the status will show "\#00FF88 PMKID CAPTURED\!\#". The data is saved to /PMKID.hc22000 on your SD card.
 
-## **Workflow 3: Beacon Frame Saturation (Stress Test)**
+## **Workflow 3: Environmental Stress Testing**
 
-Used to test how local devices handle high-density SSID environments (SSID flooding).
+Test how local infrastructure handles frame saturation.
 
-1. **Navigation:** Ensure you are in the **PENTEST ATTACK** tab.  
-2. **Selection:** A target does not necessarily need to be selected for global spam, but selecting a high-traffic channel is recommended.  
-3. **Execution:** Tap **BEACON SPAM**. The device will begin broadcasting thousands of fake SSID frames, appearing as a multitude of "ghost" networks to nearby devices.
+1. **Navigation:** Go to the **Pentest** tab.  
+2. **Deauth Test:** Tap **DEAUTH TEST**. This tests the resilience of client connections (Targeted if a client was picked, otherwise Broadcast).  
+3. **Beacon Flood:** Tap **BEACON FLOOD**. This tests how local devices handle hundreds of "ghost" networks appearing simultaneously.  
+4. **Monitoring:** Switch to the **PCAP** tab while an attack is running to log the traffic for later analysis in Wireshark.
 
-## **Workflow 4: Manual Re-Scanning**
+## **Workflow 4: Passive Traffic Analysis (Sniffing)**
 
-Used when moving locations to refresh the target list immediately.
+Identify hidden network usage and mobile device presence.
 
-1. **Scan Tab:** Navigate to **PENTEST SCAN**.  
-2. **Refresh:** Tap the **\[REFRESH\]** button (now located in the bottom right).  
-3. **Verification:** Confirm the list updates with new SSIDs and updated RSSI values.
+1. **PCAP Capture:** Go to the **PCAP** tab and tap **START PCAP**. The device hops through all 13 channels, saving everything it hears to an SD card file (/cap\_timestamp.pcap).  
+2. **Probe Sniffing:** Go to the **Probes** tab and tap **START PROBE SNIFF**. This list will populate with SSIDs that nearby phones are searching for (revealing where people have been).  
+3. **BLE Audit:** Go to the **BLE** tab. Tap **START BLE SNIFF** to log every Bluetooth MAC and RSSI in the area to /BLE\_LOG.CSV.
+
+## **Workflow 5: Power Management**
+
+1. **Sleep:** The device enters deep sleep after 5 minutes of inactivity to save battery.  
+2. **Wake:** Simply tap the screen to trigger the **TP\_INT** pin and resume your session instantly.
