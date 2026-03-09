@@ -1,0 +1,33 @@
+# **Arduino build/temp files**
+
+build/
+
+\*.elf
+
+\*.hex
+
+\*.bin
+
+\*.map
+
+\*.o
+
+\*.a
+
+\*.d
+
+# **OS generated files**
+
+.DS\_Store
+
+.DS\_Store?
+
+.\_\*
+
+.Spotlight-V100
+
+.Trashes
+
+ehthumbs.db
+
+Thumbs.db
