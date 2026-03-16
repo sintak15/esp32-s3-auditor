@@ -122,12 +122,14 @@ static StatusSnapshot read_status_snapshot() {
 
 void ui_update_tick(lv_timer_t *timer) {
     if (!ui_context) return;
+    // Guard against timer firing before ui_build() has finished assigning all objects
+    if (!lbl_batt || !lbl_batt_pct || !lbl_sd || !lbl_gps_fix || !lbl_wifi || !tabview) return;
 
     GpsSnapshot gs = read_gps_snapshot();
     StatusSnapshot ss = read_status_snapshot();
 
     // Battery
-    uint32_t batt_col = ss.batteryPct < 20 ? LV_COLOR_RED : ss.batteryPct < 50 ? LV_COLOR_YELLOW : LV_COLOR_WHITE;
+    uint32_t batt_col = ss.batteryPct < 20 ? 0xFF4444 : ss.batteryPct < 50 ? 0xFFFF00 : 0xFFFFFF;
     lv_obj_set_style_text_color(lbl_batt, lv_color_hex(batt_col), 0);
     char bpbuf[8];
     snprintf(bpbuf, sizeof(bpbuf), "%d%%", ss.batteryPct);
@@ -135,26 +137,26 @@ void ui_update_tick(lv_timer_t *timer) {
     lv_obj_set_style_text_color(lbl_batt_pct, lv_color_hex(batt_col), 0);
 
     // SD icon
-    lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? LV_COLOR_GREEN : LV_COLOR_RED), 0);
+    lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? 0x00FF88 : 0xFF4444), 0);
 
     // GPS icon
     if (gs.locValid)
-        lv_obj_set_style_text_color(lbl_gps_fix, lv_color_hex(LV_COLOR_GREEN), 0);
+        lv_obj_set_style_text_color(lbl_gps_fix, lv_color_hex(0x00FF88), 0);
     else if (gs.charsProcessed > 10) {
         static bool gb = false;
         gb = !gb;
-        lv_obj_set_style_text_color(lbl_gps_fix, lv_color_hex(gb ? LV_COLOR_YELLOW : LV_COLOR_DARK_GRAY), 0);
+        lv_obj_set_style_text_color(lbl_gps_fix, lv_color_hex(gb ? 0xFFFF00 : 0x444444), 0);
     } else {
-        lv_obj_set_style_text_color(lbl_gps_fix, lv_color_hex(LV_COLOR_DARK_GRAY), 0);
+        lv_obj_set_style_text_color(lbl_gps_fix, lv_color_hex(0x444444), 0);
     }
 
     // WiFi icon colour
-    uint32_t wc = LV_COLOR_WHITE;
-    if (ui_context->pentest.current_mode == PT_DEAUTH) wc = LV_COLOR_RED;
-    else if (ui_context->pentest.current_mode == PT_BEACON) wc = LV_COLOR_YELLOW;
-    else if (ui_context->pentest.current_mode == PT_PMKID) wc = LV_COLOR_BLUE;
-    else if (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active) wc = LV_COLOR_ORANGE;
-    else if (!ui_context->wifi_scan.paused) wc = LV_COLOR_CYAN;
+    uint32_t wc = 0xFFFFFF;
+    if (ui_context->pentest.current_mode == PT_DEAUTH) wc = 0xFF4444;
+    else if (ui_context->pentest.current_mode == PT_BEACON) wc = 0xFFFF00;
+    else if (ui_context->pentest.current_mode == PT_PMKID) wc = 0x4488FF;
+    else if (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active) wc = 0xFF8800;
+    else if (!ui_context->wifi_scan.paused) wc = 0x00FFFF;
     lv_obj_set_style_text_color(lbl_wifi, lv_color_hex(wc), 0);
 
     // GPS tab info (only update if the tab is active)

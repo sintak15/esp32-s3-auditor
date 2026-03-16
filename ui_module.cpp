@@ -152,21 +152,25 @@ void ui_build() {
     lv_obj_t *lt=lv_label_create(b); lv_label_set_text(lt,txt);
     lv_obj_set_style_text_color(lt,lv_color_hex(0xCCCCCC),0);
   };
+  // ── Shared return-home button builder ─────────
+  // Must be declared before first use (GPS/BLE/PCAP/Probes tabs all call it)
+  struct RetBtn {
+    static void add(lv_obj_t *parent) {
+      lv_obj_t *b=lv_btn_create(parent); lv_obj_set_size(b,SCREEN_W-20,35);
+      lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-4); lv_obj_add_style(b,&style_btn_dark,0);
+      lv_obj_add_event_cb(b,cb_nav_home,LV_EVENT_CLICKED,nullptr);
+      lv_obj_t *l=lv_label_create(b); lv_label_set_text(l,LV_SYMBOL_HOME " RETURN HOME");
+      lv_obj_center(l);
+    }
+  };
+  auto add_return_btn = RetBtn::add;
+
   hub(tab_home,LV_SYMBOL_WIFI,      "SCAN",    0,0,cb_nav_scan,                                               0x00FFCC);
   hub(tab_home,LV_SYMBOL_WARNING,   "PENTEST", 1,0,[](lv_event_t*){ navigate_to(2); },0xFF4444);
   hub(tab_home,LV_SYMBOL_GPS,       "GPS",     0,1,[](lv_event_t*){ navigate_to(3); },0x00AAFF);
   hub(tab_home,LV_SYMBOL_BLUETOOTH, "BLE",     1,1,[](lv_event_t*){ navigate_to(4); },0x4444FF);
   hub(tab_home,LV_SYMBOL_FILE,      "PCAP",    0,2,[](lv_event_t*){ navigate_to(5); },0xFFFF00);
   hub(tab_home,LV_SYMBOL_EYE_OPEN,  "PROBES",  1,2,[](lv_event_t*){ navigate_to(6); },0xFF00FF);
-
-  // ── Shared return-home button builder ─────────
-  auto add_return_btn=[](lv_obj_t *parent) {
-    lv_obj_t *b=lv_btn_create(parent); lv_obj_set_size(b,SCREEN_W-20,35);
-    lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-4); lv_obj_add_style(b,&style_btn_dark,0);
-    lv_obj_add_event_cb(b,cb_nav_home,LV_EVENT_CLICKED,nullptr);
-    lv_obj_t *l=lv_label_create(b); lv_label_set_text(l,LV_SYMBOL_HOME " RETURN HOME");
-    lv_obj_center(l);
-  };
 
   // ── Scan Tab ──────────────────────────────────
   lv_obj_set_style_pad_all(tab_scan, 0, 0);
