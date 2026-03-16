@@ -11,6 +11,6 @@ void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi);
 void sd_log_probe(const char* ssid);
 
 // Functions to manage PCAP file
-bool sd_logger_pcap_file_open(AppContext* context); // Renamed
-void sd_logger_pcap_file_write(pcap_record_t* record); // Renamed
-void sd_logger_pcap_file_close(); // Renamed
+bool sd_logger_pcap_file_open(AppContext* context);
+void sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record);
+void sd_logger_pcap_file_close(AppContext* context);

@@ -2,9 +2,11 @@
 #include "constants.h"
 #include "sd_logger.h"
 #include <NimBLEDevice.h>
+#include <NimBLEAddress.h> // Explicitly include NimBLEAddress header
 #include <esp_task_wdt.h>
-#include <WiFi.h>
-#include <esp_wifi.h>
+#include <WiFi.h> // For WiFi.disconnect()
+#include <esp_wifi.h> // For esp_wifi_get_mode
+#include <nimble/nimble/include/nimble/ble_gap.h> // For BLE_GAP_CONN_MODE_NON
 #include <esp_random.h>
 
 extern lv_obj_t *lbl_ble_status, *btn_ble_flood, *btn_ble_sniff;
@@ -16,8 +18,11 @@ static BLESniffCB* ble_sniffer_cb_instance = nullptr;
 BLESniffCB::BLESniffCB(AppContext* context) : app_context(context) {}
 
 void BLESniffCB::onResult(const NimBLEAdvertisedDevice *dev) {
-    if (!app_context) return;
+    if (!app_context || !dev) return;
     BleState& ble = app_context->ble;
+
+    MacAddress current_mac;
+    memcpy(current_mac.data, dev->getAddress().getNative(), 6); // Explicitly get raw MAC address bytes
 
     ble.packet_count++;
     uint8_t slot = ble.ring_head % BLE_RING_SIZE;
@@ -26,6 +31,7 @@ void BLESniffCB::onResult(const NimBLEAdvertisedDevice *dev) {
     ble.ring_buf[slot].rssi = dev->getRSSI();
     ble.ring_buf[slot].fresh = true;
     ble.ring_head++;
+    ble.unique_macs.insert(current_mac); // Insert the MacAddress struct
 }
 
 void ble_tasks_init(AppContext* context) {
@@ -139,14 +145,16 @@ void process_ble_sniff_ui(AppContext* context) {
     for (int i = 0; i < BLE_RING_SIZE; i++) {
         if (!ble.ring_buf[i].fresh) continue;
         ble.ring_buf[i].fresh = false;
-        String mac(ble.ring_buf[i].mac);
-        if (mac.length() > 0 && ble.unique_macs.find(mac.c_str()) == ble.unique_macs.end()) {
-            if (ble.unique_macs.size() > MAX_LIST_MEMORY) ble.unique_macs.clear();
-            ble.unique_macs.insert(mac.c_str());
-            ble.last_mac = mac;
-            if (sd_card_ready()) {
-                sd_log_ble_sniff(millis(), mac.c_str(), ble.ring_buf[i].rssi);
-            }
+        
+        // The unique_macs set is updated in onResult.
+        // Here, we just update the last_mac for display and log.
+        // No need to re-insert into unique_macs here.
+        String current_mac_str(ble.ring_buf[i].mac);
+        ble.last_mac = current_mac_str;
+        
+        // Log to SD card
+        if (sd_card_ready()) {
+            sd_log_ble_sniff(millis(), current_mac_str.c_str(), ble.ring_buf[i].rssi);
         }
     }
 
@@ -190,7 +198,10 @@ void process_ble_flood(AppContext* context) {
     NimBLEAdvertisementData d;
     d.setManufacturerData(std::string((char*)ap, sizeof(ap)));
     adv->setAdvertisementData(d);
-    adv->start();
+    // Configure for non-connectable, non-scannable advertisements
+    adv->setConnectable(false); // Set advertisement to non-connectable
+    adv->setScannable(false);   // Set advertisement to non-scannable
+    adv->start(0);              // Start advertising indefinitely (duration 0)
 
     last_ble = millis();
     context->ble.busy = false;

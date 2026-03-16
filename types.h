@@ -1,10 +1,11 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstdint> // Use cstdint for C++ style integer types
 #include "constants.h"
 #include <set> // For std::set<String>
-#include <String.h> // For String
-#include <freertos/FreeRTOS.h> // For QueueHandle_t
+#include <WString.h> // For String (Arduino String class)
+#include <freertos/FreeRTOS.h> // For QueueHandle_t and vTaskDelay
+#include <vector> // For std::vector
 #include <freertos/semphr.h> // For SemaphoreHandle_t
 #include <lvgl.h> // For lv_timer_t (used in PentestState)
 #include <freertos/task.h> // For TaskHandle_t
@@ -67,6 +68,25 @@ struct GpsSnapshot {
   uint16_t year;
 };
 
+// Custom struct for MAC addresses to avoid String overhead in std::set
+struct MacAddress {
+  uint8_t data[6];
+  bool operator<(const MacAddress& other) const {
+    return memcmp(data, other.data, 6) < 0;
+  }
+  bool operator==(const MacAddress& other) const {
+    return memcmp(data, other.data, 6) == 0;
+  }
+};
+
+// Custom struct for Probe SSIDs to avoid String overhead in std::set
+struct ProbeSsid {
+  char data[PROBE_MAX_SSID_LEN + 1];
+  bool operator<(const ProbeSsid& other) const {
+    return strcmp(data, other.data) < 0;
+  }
+};
+
 struct StatusSnapshot {
   bool sdMounted;
   int  batteryPct;
@@ -98,6 +118,7 @@ struct PentestState {
   int beacon_idx;
   bool pmkid_found;
   uint8_t pmkid_target_bssid[6]; // Used in pentest_attacks.cpp
+  std::vector<String> custom_beacon_ssids; // For user-defined beacon SSIDs
 };
 
 // Define SnifferState
@@ -112,7 +133,8 @@ struct SnifferState {
   uint8_t channel;
   bool pcap_ch_locked; // Added for channel locking
   uint8_t pcap_locked_ch; // Added for locked channel value
-  std::set<String> unique_probes;
+  std::set<ProbeSsid> unique_probes; // Changed from std::set<String>
+  TaskHandle_t probe_task_handle; // For managing probe processing task
 };
 
 // Define BleState
@@ -121,8 +143,8 @@ struct BleState {
   bool flood_active;
   bool busy;
   bool nimble_ready;
-  NimBLEScan* scanner;
-  std::set<String> unique_macs;
+  NimBLEScan* scanner; // NimBLEScan is a static object, no need to manage its memory directly
+  std::set<MacAddress> unique_macs; // Changed from std::set<String>
   uint32_t packet_count;
   String last_mac;
   BLERing ring_buf[BLE_RING_SIZE];

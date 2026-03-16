@@ -1,76 +1,56 @@
 #pragma once
 
-// ──────────────────────────────────────────────
-//              PIN DEFINITIONS
-// ──────────────────────────────────────────────
-#define I2C_SDA         16
-#define I2C_SCL         15
-#define TP_RST          18
-#define TFT_BL          45
-#define BATT_ADC         9
-#define GPS_RX_PIN      43
-#define GPS_TX_PIN      44
+// UI
+#define SCREEN_W 320
+#define SCREEN_H 240
+#define LV_COLOR_DARK_BG 0x111111
+#define LV_COLOR_LIGHT_BG 0x181818
+#define LV_COLOR_RED 0xFF0000
+#define LV_COLOR_YELLOW 0xFFFF00
+#define LV_COLOR_GREEN 0x00FF00
+#define LV_COLOR_BLUE 0x0000FF
+#define LV_COLOR_CYAN 0x00FFFF
+#define LV_COLOR_DARK_GRAY 0x444444
 
-// ──────────────────────────────────────────────
-//              DISPLAY & TOUCH
-// ──────────────────────────────────────────────
-#define SCREEN_W        240
-#define SCREEN_H        320
-#define TOUCH_ADDR      0x38
+// Hardware Pins
+#define TFT_BL 45 // Backlight control
+#define TP_RST 18 // Touch reset
+#define I2C_SDA 16 // Touch I2C SDA
+#define I2C_SCL 15 // Touch I2C SCL
+#define TOUCH_ADDR 0x38 // Touch controller I2C address
+#define TP_INT 17 // Touch interrupt pin
+#define GPS_RX_PIN 43
+#define GPS_TX_PIN 44
+#define BATT_ADC 1 // ADC pin for battery voltage reading
 
-// ──────────────────────────────────────────────
-//              SCAN & TIMING
-// ──────────────────────────────────────────────
-#define MAX_APS                 40
-#define MAX_STAS                60
-#define STA_TIMEOUT_MS          30000
-#define AP_SCAN_INTERVAL_MS     5000 // Interval for AP scanning
-#define SCAN_INTERVAL_MS        5000
-#define MAX_LIST_MEMORY         500
-#define BEACON_SSID_COUNT       10
-#define BLE_RING_SIZE           8
+// WiFi Scanner
+#define MAX_APS 64
+#define MAX_STAS 128
+#define STA_TIMEOUT_MS 30000 // 30 seconds
+#define AP_SCAN_INTERVAL_MS 5000 // 5 seconds
 
-// ──────────────────────────────────────────────
-//              PCAP & SNIFFING
-// ──────────────────────────────────────────────
-#define MAX_PCAP_PACKET_SIZE    256
-#define PCAP_QUEUE_SIZE         20
-#define PROBE_QUEUE_SIZE        50
-#define PROBE_MAX_SSID_LEN      32
-#define CHANNEL_HOP_INTERVAL_MS 250
+// PCAP Sniffer
+#define MAX_PCAP_PACKET_SIZE 256 // Max size of 802.11 frame to capture
+#define PCAP_QUEUE_SIZE 100 // Number of packets in the ring buffer
+#define CHANNEL_HOP_INTERVAL_MS 100 // Time to stay on a channel during sniffing
 
-// ──────────────────────────────────────────────
-//              FILE PATHS
-// ──────────────────────────────────────────────
-#define WIFI_SCAN_LOG   "/WIFI_SCAN.CSV"
-#define PMKID_HASH_LOG  "/PMKID.hc22000"
-#define PMKID_CSV_LOG   "/PMKID.csv"
-#define BLE_SNIFF_LOG   "/BLE_LOG.CSV"
-#define PROBE_REQ_LOG   "/PROBES.CSV"
+// Probe Sniffer
+#define PROBE_MAX_SSID_LEN 32
+#define PROBE_QUEUE_SIZE 50
+#define MAX_LIST_MEMORY 100 // Max items in UI list before clearing
 
-// ──────────────────────────────────────────────
-//                 UI COLORS
-// ──────────────────────────────────────────────
-#define LV_COLOR_DARK_BG        0x0E0E0E
-#define LV_COLOR_LIGHT_BG       0x111822
-#define LV_COLOR_DARK_GRAY      0x444444
-#define LV_COLOR_GRAY           0x777777
-#define LV_COLOR_LIGHT_GRAY     0xAAAAAA
-#define LV_COLOR_WHITE          0xFFFFFF
-#define LV_COLOR_CYAN           0x00FFCC
-#define LV_COLOR_GREEN          0x00FF88
-#define LV_COLOR_YELLOW         0xFFAA00
-#define LV_COLOR_ORANGE         0xFF8800
-#define LV_COLOR_RED            0xFF4444
-#define LV_COLOR_BLUE           0x00AAFF
-#define LV_COLOR_PURPLE         0x8800FF
+// BLE
+#define BLE_RING_SIZE 10 // Size of BLE ring buffer for UI display
 
-// ──────────────────────────────────────────────
-//              FAKE BEACON SSIDS
-// ──────────────────────────────────────────────
-// Note: BEACON_SSID_COUNT must match the number of items
-static const char *FAKE_BEACON_SSIDS[BEACON_SSID_COUNT] = {
-  "FBI_Surveillance_Van","Not_Your_WiFi","Pretty_Fly_4_A_WiFi",
-  "Tell_My_WiFi_Love_Her","Virus.exe","SkyNet_Node_7",
-  "DEA_Unit_12","NSA_Listening_Post","Router_of_Doom","Free_5G_COVID"
-};
+// NVS (Non-Volatile Storage)
+#define NVS_NAMESPACE "pentester"
+#define NVS_BEACON_SSIDS_KEY "beacon_ssids"
+#define MAX_BEACON_SSIDS 10
+#define MAX_BEACON_SSID_LENGTH 32
+
+// SD Logger File Names
+#define WIFI_SCAN_LOG "/WIFI_SCAN.CSV"
+#define PMKID_HASH_LOG "/PMKID.hc22000"
+#define PMKID_CSV_LOG "/PMKID.CSV"
+#define BLE_SNIFF_LOG "/BLE_LOG.CSV"
+#define PROBE_REQ_LOG "/PROBES.TXT"

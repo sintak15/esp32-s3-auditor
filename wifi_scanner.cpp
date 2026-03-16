@@ -61,20 +61,14 @@ void wifi_scanner_init(AppContext* context) {
 }
 
 void set_promiscuous_channel(uint8_t ch) {
-    // Fully stop/restart so esp_wifi_80211_tx has a valid STA interface
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_stop();
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_start();
-    delay(50); // let the interface come up before any tx attempts
-    esp_wifi_set_promiscuous(true);
+    // Assumes promiscuous mode is already active. Only change channel.
     esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
 }
 
 void restore_sta_sniffer(AppContext* context) {
     if (context->sniffer.pcap_active || context->sniffer.probe_active) return;
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_stop();
+    // Ensure WiFi is in STA mode and promiscuous mode is enabled.
+    // Avoid full stop/start if already in promiscuous mode.
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_start();
     delay(20);

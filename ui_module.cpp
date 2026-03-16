@@ -1,7 +1,10 @@
 #include "ui_module.h"
 #include "sd_logger.h"
 #include <Arduino.h>
-#include "types.h" // Ensure types.h is included for AppContext definition
+#include <nvs_flash.h> // For NVS functions
+#include "pentest_attacks.h" // For save_beacon_ssids_to_nvs
+#include "types.h" // Includes constants.h indirectly
+#include "constants.h" // Explicitly include constants.h for MAX_BEACON_SSIDS etc.
 
 // Global AppContext instance (defined in main .ino file)
 extern AppContext g_app_context;
@@ -9,8 +12,7 @@ extern AppContext g_app_context;
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
 lv_obj_t *lbl_sd, *lbl_wifi, *lbl_gps_fix, *lbl_batt, *lbl_batt_pct;
-lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_gps;
-lv_obj_t *tab_ble, *tab_pcap, *tab_probes;
+lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_gps, *tab_ble, *tab_pcap, *tab_probes, *tab_settings; // Consolidated tab declarations
 lv_obj_t *lbl_gps_info;
 lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
@@ -24,6 +26,7 @@ lv_obj_t *probe_list;
 lv_obj_t *btn_ble_sniff  = nullptr;
 lv_obj_t *btn_ble_flood  = nullptr;
 lv_obj_t *btn_pcap_start = nullptr;
+lv_obj_t *ta_beacon_ssids = nullptr; // Text area for beacon SSIDs (declared here)
 lv_obj_t *btn_probe_start = nullptr;
 
 lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
@@ -129,9 +132,10 @@ void ui_build() {
   tab_ble     =lv_tabview_add_tab(tabview, "BLE");
   tab_pcap    =lv_tabview_add_tab(tabview, "PCAP");
   tab_probes  =lv_tabview_add_tab(tabview, "Probes");
-
-  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_pentest,tab_gps,tab_ble,tab_pcap,tab_probes,tv_cont};
-  for (int i=0; i<8; i++) no_scroll(all_tabs[i]);
+  tab_settings =lv_tabview_add_tab(tabview, "Settings");
+  
+  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_pentest,tab_gps,tab_ble,tab_pcap,tab_probes,tab_settings,tv_cont};
+  for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
   lv_obj_set_layout(tab_home, LV_LAYOUT_GRID);
@@ -159,6 +163,7 @@ void ui_build() {
   hub(tab_home,LV_SYMBOL_BLUETOOTH, "BLE",     1,1,[](lv_event_t*){ navigate_to(4); },0x4444FF);
   hub(tab_home,LV_SYMBOL_FILE,      "PCAP",    0,2,[](lv_event_t*){ navigate_to(5); },0xFFFF00);
   hub(tab_home,LV_SYMBOL_EYE_OPEN,  "PROBES",  1,2,[](lv_event_t*){ navigate_to(6); },0xFF00FF);
+  hub(tab_home,LV_SYMBOL_SETTINGS,  "SETTINGS",0,2,[](lv_event_t*){ navigate_to(7); },0xAAAAAA); // New settings button
 
   // ── Shared return-home button builder ─────────
   auto add_return_btn=[](lv_obj_t *parent) {
@@ -379,4 +384,59 @@ void ui_build() {
   lv_obj_add_event_cb(btn_probe_start,cb_toggle_probes,LV_EVENT_CLICKED,nullptr);
   lv_obj_t *lpr=lv_label_create(btn_probe_start); lv_label_set_text(lpr,"START PROBE SNIFF"); lv_obj_center(lpr);
   add_return_btn(tab_probes);
+
+  // ── Settings Tab ──────────────────────────────
+  lv_obj_t *lbl_st = lv_label_create(tab_settings);
+  lv_label_set_text(lbl_st, "#AAAAAA Beacon SSIDs (one per line):#");
+  lv_obj_align(lbl_st, LV_ALIGN_TOP_LEFT, 5, 5);
+
+  ta_beacon_ssids = lv_textarea_create(tab_settings);
+  lv_obj_set_size(ta_beacon_ssids, SCREEN_W - 20, 120);
+  lv_obj_align_to(ta_beacon_ssids, lbl_st, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 5);
+  lv_textarea_set_max_length(ta_beacon_ssids, MAX_BEACON_SSIDS * (MAX_BEACON_SSID_LENGTH + 1)); // Max length for all SSIDs
+  lv_textarea_set_placeholder_text(ta_beacon_ssids, "Enter SSIDs (one per line)...");
+  lv_textarea_set_one_line(ta_beacon_ssids, false);
+  lv_obj_add_event_cb(ta_beacon_ssids, [](lv_event_t *e) {
+    // When text area content changes, update g_app_context.pentest.custom_beacon_ssids
+    // The actual saving to NVS should ideally be triggered by a "Save" button
+    // to avoid frequent NVS writes and potential performance issues.
+    const char* text = lv_textarea_get_text(ta_beacon_ssids);
+    g_app_context.pentest.custom_beacon_ssids.clear();
+    String current_ssid = "";
+    for (int i = 0; text[i] != '\0'; ++i) {
+      if (text[i] == '\n') {
+        if (current_ssid.length() > 0 && current_ssid.length() <= MAX_BEACON_SSID_LENGTH) {
+          if (g_app_context.pentest.custom_beacon_ssids.size() < MAX_BEACON_SSIDS) {
+            g_app_context.pentest.custom_beacon_ssids.push_back(current_ssid);
+          }
+        }
+        current_ssid = "";
+      } else {
+        current_ssid += text[i];
+      }
+    }
+    if (current_ssid.length() > 0 && current_ssid.length() <= MAX_BEACON_SSID_LENGTH && g_app_context.pentest.custom_beacon_ssids.size() < MAX_BEACON_SSIDS) {
+      g_app_context.pentest.custom_beacon_ssids.push_back(current_ssid);
+    }
+  }, LV_EVENT_VALUE_CHANGED, nullptr);
+
+  // Populate text area with current SSIDs
+  String all_ssids = "";
+  for (const String& ssid : g_app_context.pentest.custom_beacon_ssids) {
+    all_ssids += ssid + "\n";
+  }
+  lv_textarea_set_text(ta_beacon_ssids, all_ssids.c_str());
+
+  // Add a "Save" button for beacon SSIDs
+  lv_obj_t *btn_save_ssids = lv_btn_create(tab_settings);
+  lv_obj_set_size(btn_save_ssids, SCREEN_W - 20, 36);
+  lv_obj_align_to(btn_save_ssids, ta_beacon_ssids, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
+  lv_obj_add_style(btn_save_ssids, &style_btn_dark, 0);
+  lv_obj_add_event_cb(btn_save_ssids, [](lv_event_t *e) {
+    save_beacon_ssids_to_nvs(&g_app_context);
+    lv_label_set_text(lv_obj_get_child(e->target, 0), LV_SYMBOL_OK " SAVED!");
+  }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lbl_save_ssids = lv_label_create(btn_save_ssids); lv_label_set_text(lbl_save_ssids, LV_SYMBOL_SAVE " SAVE SSIDs"); lv_obj_center(lbl_save_ssids);
+
+  add_return_btn(tab_settings);
 }

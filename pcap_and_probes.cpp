@@ -14,7 +14,7 @@ static AppContext* sniffer_context = nullptr; // Declaration for sniffer_context
 void pcap_and_probes_init(AppContext* context) {
     sniffer_context = context;
     context->sniffer.pcap_queue = xQueueCreate(PCAP_QUEUE_SIZE, sizeof(pcap_record_t));
-    context->sniffer.probe_queue = xQueueCreate(PROBE_QUEUE_SIZE, PROBE_MAX_SSID_LEN + 1);
+    context->sniffer.probe_queue = xQueueCreate(PROBE_QUEUE_SIZE, sizeof(ProbeSsid)); // Corrected size
 }
 
 void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
@@ -29,8 +29,9 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
 
     if (sniffer.pcap_active && len <= MAX_PCAP_PACKET_SIZE) {
         pcap_record_t rec;
-        rec.ts_sec = millis() / 1000;
-        rec.ts_usec = (millis() % 1000) * 1000;
+        uint64_t us = esp_timer_get_time(); // Get microsecond timestamp
+        rec.ts_sec = us / 1000000;
+        rec.ts_usec = us % 1000000;
         rec.len = len;
         memcpy(rec.payload, frame, len);
         xQueueSendFromISR(sniffer.pcap_queue, &rec, NULL);
@@ -40,10 +41,11 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
         if (len > 26 && frame[24] == 0x00) {
             uint8_t sl = frame[25];
             if (sl > 0 && sl <= PROBE_MAX_SSID_LEN && (26 + sl <= len)) {
-                char sb[PROBE_MAX_SSID_LEN + 1];
-                memcpy(sb, &frame[26], sl);
-                sb[sl] = '\0';
-                xQueueSendFromISR(sniffer.probe_queue, sb, NULL);
+                // Create a ProbeSsid struct and send it
+                ProbeSsid probe_data;
+                memcpy(probe_data.data, &frame[26], sl);
+                probe_data.data[PROBE_MAX_SSID_LEN] = '\0'; // Ensure null termination
+                xQueueSendFromISR(sniffer.probe_queue, &probe_data, NULL);
             }
         }
     }
@@ -53,8 +55,8 @@ void process_pcap_queue(AppContext* context) {
     if (!context->sniffer.pcap_active || !context->sniffer.pcap_file) return;
     pcap_record_t rec;
     int writes = 0;
-    while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0) == pdTRUE) {
-        sd_logger_pcap_file_write(&rec); // Corrected function call
+    while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0) == pdTRUE) { // Pass address
+        sd_logger_pcap_file_write(context, &rec); // Corrected function call
         context->sniffer.pcap_packet_count++;
         if (++writes >= 50) break; // Don't block the main loop for too long
     }
@@ -62,18 +64,17 @@ void process_pcap_queue(AppContext* context) {
 
 void process_probe_queue(AppContext* context) {
     if (!context->sniffer.probe_active) return;
-    char sb[PROBE_MAX_SSID_LEN + 1];
-    while (xQueueReceive(context->sniffer.probe_queue, sb, 0)) {
-        String s(sb);
-        if (s.length() > 0 && s.length() <= PROBE_MAX_SSID_LEN && context->sniffer.unique_probes.find(s) == context->sniffer.unique_probes.end()) {
+    ProbeSsid received_probe_ssid; // Receive into a struct
+    while (xQueueReceive(context->sniffer.probe_queue, &received_probe_ssid, 0) == pdTRUE) { // Pass address
+        if (strlen(received_probe_ssid.data) > 0 && context->sniffer.unique_probes.find(received_probe_ssid) == context->sniffer.unique_probes.end()) {
             if (context->sniffer.unique_probes.size() > MAX_LIST_MEMORY) {
                 context->sniffer.unique_probes.clear();
                 if (probe_list) lv_obj_clean(probe_list); // Guard against probe_list not being initialized
             }
-            context->sniffer.unique_probes.insert(s);
-            lv_list_add_text(probe_list, s.c_str());
+            context->sniffer.unique_probes.insert(received_probe_ssid);
+            lv_list_add_text(probe_list, received_probe_ssid.data);
             if (sd_card_ready()) {
-                sd_log_probe(s.c_str());
+                sd_log_probe(received_probe_ssid.data);
             }
         }
     }
@@ -129,7 +130,7 @@ void stop_pcap(AppContext* context) {
     if (!context->sniffer.pcap_active) return;
     context->sniffer.pcap_active = false;
     esp_wifi_set_promiscuous(false);
-    sd_logger_pcap_file_close(); // Corrected function call
+    sd_logger_pcap_file_close(context); // Corrected function call
     if (btn_pcap_start) lv_label_set_text(lv_obj_get_child(btn_pcap_start, 0), "START PCAP");
     lv_label_set_text(lbl_pcap_status, "#00FF88 Capture saved to SD#");
 }

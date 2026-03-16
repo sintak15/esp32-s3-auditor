@@ -2,6 +2,9 @@
 #include "constants.h"
 #include <SD_MMC.h>
 
+// Forward declaration for enc_str from wifi_scanner.cpp
+extern const char* enc_str(uint8_t enc);
+
 static bool sd_ready = false;
 
 void sd_logger_init() {
@@ -62,7 +65,7 @@ void sd_log_scan(AppContext* context) {
             f.printf("%.6f,%.6f,\"%s\",%s,%d,%d,%s\n",
                      lat, lon, context->wifi_scan.ap_list[i].ssid, bss,
                      context->wifi_scan.ap_list[i].rssi, context->wifi_scan.ap_list[i].channel,
-                     "ENC_TYPE" /* TODO: Pass enc_str logic here */);
+                     enc_str(context->wifi_scan.ap_list[i].enc));
         }
     }
     f.close();
@@ -112,38 +115,35 @@ void sd_log_probe(const char* ssid) {
 
 // --- PCAP File Management ---
 
-static File sd_logger_pcap_file_handle; // Renamed to avoid collision
-
 bool sd_logger_pcap_file_open(AppContext* context) { // Renamed function
     if (!sd_ready) return false;
     char fn[32];
     sprintf(fn, "/cap_%lu.pcap", millis());
-    sd_logger_pcap_file_handle = SD_MMC.open(fn, FILE_WRITE); // Use renamed handle
-    if (sd_logger_pcap_file_handle) {
+    context->sniffer.pcap_file = SD_MMC.open(fn, FILE_WRITE);
+    if (context->sniffer.pcap_file) {
         pcap_global_header gh = {0xa1b2c3d4, 2, 4, 0, 0, 65535, 105};
-        sd_logger_pcap_file_handle.write((uint8_t*)&gh, sizeof(gh));
-        sd_logger_pcap_file_handle.flush();
-        context->sniffer.pcap_file = sd_logger_pcap_file_handle;
+        context->sniffer.pcap_file.write((uint8_t*)&gh, sizeof(gh));
+        context->sniffer.pcap_file.flush();
         return true;
     }
     return false;
 }
 
-void sd_logger_pcap_file_write(pcap_record_t* record) { // Renamed function
-    if (sd_logger_pcap_file_handle) {
+void sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // Renamed function
+    if (context->sniffer.pcap_file) {
         pcap_packet_header h;
         h.ts_sec = record->ts_sec;
         h.ts_usec = record->ts_usec;
         h.incl_len = record->len;
         h.orig_len = record->len;
-        sd_logger_pcap_file_handle.write((uint8_t*)&h, sizeof(h));
-        sd_logger_pcap_file_handle.write(record->payload, record->len);
+        context->sniffer.pcap_file.write((uint8_t*)&h, sizeof(h));
+        context->sniffer.pcap_file.write(record->payload, record->len);
     }
 }
 
-void sd_logger_pcap_file_close() { // Renamed function
-    if (sd_logger_pcap_file_handle) {
-        sd_logger_pcap_file_handle.flush();
-        sd_logger_pcap_file_handle.close();
+void sd_logger_pcap_file_close(AppContext* context) { // Renamed function
+    if (context->sniffer.pcap_file) {
+        context->sniffer.pcap_file.flush();
+        context->sniffer.pcap_file.close();
     }
 }
