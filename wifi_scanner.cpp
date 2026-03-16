@@ -3,6 +3,7 @@
 #include "sd_logger.h"
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <esp_task_wdt.h>
 
 // Forward declarations for UI elements from ui_module.h
 extern lv_obj_t *scan_list, *lbl_scan_count, *btn_view_ap, *btn_view_sta, *btn_view_linked;
@@ -60,19 +61,23 @@ void wifi_scanner_init(AppContext* context) {
 }
 
 void set_promiscuous_channel(uint8_t ch) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_MODE_NULL);
-    delay(30);
+    // Fully stop/restart so esp_wifi_80211_tx has a valid STA interface
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_stop();
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_start();
+    delay(50); // let the interface come up before any tx attempts
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
 }
 
 void restore_sta_sniffer(AppContext* context) {
     if (context->sniffer.pcap_active || context->sniffer.probe_active) return;
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_stop();
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_start();
+    delay(20);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(sta_sniffer_cb);
 }
@@ -146,7 +151,11 @@ void run_ap_scan(AppContext* context) {
     esp_wifi_set_promiscuous(false);
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
-    int n = WiFi.scanNetworks(false, true);
+    esp_task_wdt_reset();
+    // max_ms_per_chan=100 keeps total scan under ~1.4s; guard against WIFI_SCAN_FAILED
+    int n = WiFi.scanNetworks(false, true, false, 100);
+    esp_task_wdt_reset();
+    if (n == WIFI_SCAN_FAILED || n < 0) n = 0;
 
     for (int i = 0; i < n; i++) {
         uint8_t *bssid = WiFi.BSSID(i);
@@ -334,10 +343,14 @@ void render_scan_list(AppContext* context) {
     }
 }
 
+// tabview is defined in ui_module.cpp - reference directly to avoid fragile parent traversal
+extern lv_obj_t *tabview;
+
 void scan_tick(lv_timer_t * timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context || context->ui_busy || context->wifi_scan.paused || context->pentest.current_mode != PT_NONE) return;
-    if (lv_tabview_get_tab_act(lv_obj_get_parent(lv_obj_get_parent(scan_list))) != 1) return;
+    if (!tabview || !scan_list) return;
+    if (lv_tabview_get_tab_act(tabview) != 1) return;
     
     expire_stas(context);
     uint32_t now = millis();

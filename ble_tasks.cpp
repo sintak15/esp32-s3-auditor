@@ -5,6 +5,7 @@
 #include <esp_task_wdt.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <esp_random.h>
 
 extern lv_obj_t *lbl_ble_status, *btn_ble_flood, *btn_ble_sniff;
 
@@ -41,6 +42,7 @@ void stop_ble(AppContext* context) {
         delay(5);
     }
     if (context->ble.busy) {
+        // Force-clear stuck state
         context->ble.flood_active = false;
         context->ble.sniff_active = false;
         context->ble.nimble_ready = false;
@@ -63,6 +65,7 @@ void stop_ble(AppContext* context) {
         if (context->ble.nimble_ready) {
             NimBLEDevice::deinit(true);
             context->ble.nimble_ready = false;
+            context->ble.scanner = nullptr;
         }
         esp_task_wdt_reset(); delay(100); esp_task_wdt_reset();
         if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
@@ -71,8 +74,10 @@ void stop_ble(AppContext* context) {
     if (context->ble.flood_active) {
         context->ble.flood_active = false;
         if (context->ble.nimble_ready) {
-            NimBLEDevice::getAdvertising()->stop();
-            esp_task_wdt_reset(); delay(20); esp_task_wdt_reset();
+            // Stop advertising safely before deinit
+            NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+            if (adv) adv->stop();
+            esp_task_wdt_reset(); delay(50); esp_task_wdt_reset();
             NimBLEDevice::deinit(true);
             context->ble.nimble_ready = false;
             esp_task_wdt_reset(); delay(50); esp_task_wdt_reset();
@@ -87,14 +92,18 @@ void stop_ble(AppContext* context) {
 void start_ble_sniff(AppContext* context) {
     if (context->ble.busy) return;
     context->ble.busy = true;
-    
+
     if (context->ble.flood_active) stop_ble(context);
 
     context->wifi_scan.paused = true;
     esp_wifi_set_promiscuous(false);
-    WiFi.disconnect(true);
+    // Only call disconnect if WiFi was actually initialized
+    wifi_mode_t mode;
+    if (esp_wifi_get_mode(&mode) == ESP_OK) {
+        WiFi.disconnect(true);
+    }
     esp_task_wdt_reset(); delay(50); esp_task_wdt_reset();
-    
+
     NimBLEDevice::init("");
     context->ble.nimble_ready = true;
     context->ble.scanner = NimBLEDevice::getScan();
@@ -104,13 +113,12 @@ void start_ble_sniff(AppContext* context) {
     context->ble.scanner->setWindow(99);
     esp_task_wdt_reset();
     context->ble.scanner->start(0, false, true);
-    
+
     context->ble.unique_macs.clear();
     context->ble.packet_count = 0;
     context->ble.sniff_active = true;
     context->ble.busy = false;
 }
-
 
 void start_ble_flood(AppContext* context) {
     if (context->ble.busy) return;
@@ -120,8 +128,19 @@ void start_ble_flood(AppContext* context) {
 
     context->wifi_scan.paused = true;
     esp_wifi_set_promiscuous(false);
-    WiFi.disconnect(true);
+    // Only call disconnect if WiFi was actually initialized
+    wifi_mode_t mode;
+    if (esp_wifi_get_mode(&mode) == ESP_OK) {
+        WiFi.disconnect(true);
+    }
     esp_task_wdt_reset();
+
+    // Init NimBLE once here — process_ble_flood will reuse it each cycle
+    // rather than deinit/reinit every 300ms (which causes PC=0x0 crash)
+    if (!context->ble.nimble_ready) {
+        NimBLEDevice::init("");
+        context->ble.nimble_ready = true;
+    }
 
     context->ble.flood_active = true;
     context->ble.busy = false;
@@ -159,27 +178,34 @@ void process_ble_flood(AppContext* context) {
     static uint32_t last_ble = 0;
     if (millis() - last_ble < 300) return;
 
-    context->ble.busy = true;
-    if (!context->ble.flood_active) { context->ble.busy = false; return; }
+    // Guard: NimBLE must be initialized (done once in start_ble_flood)
+    if (!context->ble.nimble_ready) return;
 
-    if (context->ble.nimble_ready) {
-        NimBLEDevice::getAdvertising()->stop();
-        NimBLEDevice::deinit(true);
-        context->ble.nimble_ready = false;
+    context->ble.busy = true;
+
+    // Reuse the existing NimBLE instance — just stop, update payload, restart.
+    // Do NOT deinit/reinit every cycle: after deinit the host task is destroyed
+    // and getAdvertising() returns a pointer with a NULL vtable, causing PC=0x0 crash.
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    if (!adv) {
+        context->ble.busy = false;
+        return;
     }
 
-    if (!context->ble.flood_active) { context->ble.busy = false; return; }
+    adv->stop();
+    esp_task_wdt_reset();
 
-    NimBLEDevice::init("");
-    context->ble.nimble_ready = true;
-    NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
-    NimBLEAdvertisementData d;
+    // Randomize the 6 filler bytes in the Apple proximity payload so each
+    // beacon looks like a different device
     uint8_t ap[] = {0x4C,0x00,0x07,0x19,0x01,0x0A,0x20,0x55,0x14,0x58,0x6E,0x42,
                     0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+    esp_fill_random(&ap[12], 6); // randomize trailing bytes
+
+    NimBLEAdvertisementData d;
     d.setManufacturerData(std::string((char*)ap, sizeof(ap)));
     adv->setAdvertisementData(d);
     adv->start();
-    last_ble = millis();
 
+    last_ble = millis();
     context->ble.busy = false;
 }
