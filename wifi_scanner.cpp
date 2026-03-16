@@ -1,10 +1,21 @@
 #include "wifi_scanner.h"
 #include "constants.h"
+#include "types.h"
+#include <WiFi.h>
+#include <esp_wifi.h>
 
 static AppContext *context = nullptr;
 
+// Extern declarations for UI elements
+extern lv_obj_t *scan_list;
+extern lv_obj_t *lbl_scan_count;
+extern void cb_net_selected(lv_event_t* e);
+
 void wifi_scanner_init(AppContext *ctx) {
     context = ctx;
+    if (context && !context->wifi_scan.mutex) {
+        context->wifi_scan.mutex = xSemaphoreCreateMutex();
+    }
 }
 
 const char* enc_str(uint8_t enc) {
@@ -22,33 +33,137 @@ const char* enc_str(uint8_t enc) {
     }
 }
 
-void wifi_scanner_task(void *param) {
+void restore_sta_sniffer(AppContext *ctx) {
+    // Re-enable promiscuous mode if needed for STAs
+    esp_wifi_set_promiscuous(true);
+}
 
-    while (true) {
+void run_ap_scan(AppContext *ctx) {
+    if (!ctx) return;
+    WiFi.scanNetworks(true); // async scan
+}
 
-        int n = WiFi.scanNetworks();
+void render_scan_list(AppContext *ctx) {
+    if (!ctx || !scan_list || !lbl_scan_count) return;
 
-        if (!context) {
-            vTaskDelay(pdMS_TO_TICKS(2000));
-            continue;
+    lv_obj_clean(scan_list);
+    char buf[128];
+    if (ctx->wifi_scan.mutex && xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        snprintf(buf, sizeof(buf), "APs: %d  STAs: %d", ctx->wifi_scan.ap_count, ctx->wifi_scan.sta_count);
+        lv_label_set_text(lbl_scan_count, buf);
+        
+        if (ctx->wifi_scan.view == VIEW_AP) {
+            for (int i = 0; i < ctx->wifi_scan.ap_count; i++) {
+                if (ctx->wifi_scan.ap_list[i].active) {
+                    char bss[18];
+                    sprintf(bss, "%02X:%02X:%02X:%02X:%02X:%02X", 
+                            ctx->wifi_scan.ap_list[i].bssid[0], ctx->wifi_scan.ap_list[i].bssid[1],
+                            ctx->wifi_scan.ap_list[i].bssid[2], ctx->wifi_scan.ap_list[i].bssid[3],
+                            ctx->wifi_scan.ap_list[i].bssid[4], ctx->wifi_scan.ap_list[i].bssid[5]);
+                    char txt[128];
+                    snprintf(txt, sizeof(txt), "[%s] %s (Ch:%d, %ddBm)", enc_str(ctx->wifi_scan.ap_list[i].enc), ctx->wifi_scan.ap_list[i].ssid, ctx->wifi_scan.ap_list[i].channel, ctx->wifi_scan.ap_list[i].rssi);
+                    lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_WIFI, txt);
+                    lv_obj_set_user_data(btn, (void*)(intptr_t)i);
+                    lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
+                }
+            }
+        } else if (ctx->wifi_scan.view == VIEW_STA) {
+             for (int i = 0; i < ctx->wifi_scan.sta_count; i++) {
+                if (ctx->wifi_scan.sta_list[i].active) {
+                    char mac[18];
+                    sprintf(mac, "%02X:%02X:%02X:%02X:%02X:%02X", 
+                            ctx->wifi_scan.sta_list[i].mac[0], ctx->wifi_scan.sta_list[i].mac[1],
+                            ctx->wifi_scan.sta_list[i].mac[2], ctx->wifi_scan.sta_list[i].mac[3],
+                            ctx->wifi_scan.sta_list[i].mac[4], ctx->wifi_scan.sta_list[i].mac[5]);
+                    char txt[128];
+                    snprintf(txt, sizeof(txt), "%s (%ddBm)", mac, ctx->wifi_scan.sta_list[i].rssi);
+                    lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_BLUETOOTH, txt);
+                    lv_obj_set_user_data(btn, (void*)(intptr_t)i);
+                    // Could add STA selected event callback if implemented later
+                }
+            }
+        } else if (ctx->wifi_scan.view == VIEW_LINKED) {
+            bool found_any = false;
+            
+            for (int i = 0; i < ctx->wifi_scan.ap_count; i++) {
+                if (!ctx->wifi_scan.ap_list[i].active) continue;
+                
+                bool has_linked_stas = false;
+                for (int j = 0; j < ctx->wifi_scan.sta_count; j++) {
+                    if (ctx->wifi_scan.sta_list[j].active && ctx->wifi_scan.sta_list[j].hasAP &&
+                        memcmp(ctx->wifi_scan.sta_list[j].apBssid, ctx->wifi_scan.ap_list[i].bssid, 6) == 0) {
+                        has_linked_stas = true;
+                        break;
+                    }
+                }
+                
+                if (has_linked_stas) {
+                    char txt[128];
+                    snprintf(txt, sizeof(txt), "AP: %s", ctx->wifi_scan.ap_list[i].ssid);
+                    lv_list_add_text(scan_list, txt);
+                    
+                    for (int j = 0; j < ctx->wifi_scan.sta_count; j++) {
+                        if (ctx->wifi_scan.sta_list[j].active && ctx->wifi_scan.sta_list[j].hasAP &&
+                            memcmp(ctx->wifi_scan.sta_list[j].apBssid, ctx->wifi_scan.ap_list[i].bssid, 6) == 0) {
+                            
+                            char mac[18];
+                            mac_str(ctx->wifi_scan.sta_list[j].mac, mac);
+                            snprintf(txt, sizeof(txt), "  %s (%ddBm)", mac, ctx->wifi_scan.sta_list[j].rssi);
+                            
+                            lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_RIGHT, txt);
+                            lv_obj_set_user_data(btn, (void*)(intptr_t)i); // Pass AP index for targeting
+                            lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
+                            found_any = true;
+                        }
+                    }
+                }
+            }
+            
+            if (!found_any) {
+                lv_list_add_text(scan_list, "No associated clients found yet");
+            }
         }
 
-        context->scan_count = 0;
+        xSemaphoreGive(ctx->wifi_scan.mutex);
+    }
+}
 
-        for (int i = 0; i < n && i < MAX_SCAN_RESULTS; i++) {
+void set_promiscuous_channel(uint8_t ch) {
+    esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+}
 
-            ScanResult &r = context->scan_results[i];
+void mac_str(const uint8_t *mac, char *out) {
+    sprintf(out, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
 
-            r.ssid = WiFi.SSID(i);
-            r.rssi = WiFi.RSSI(i);
-            r.channel = WiFi.channel(i);
-            r.encryption = WiFi.encryptionType(i);
+void scan_tick(lv_timer_t *timer) {
+    AppContext *ctx = (AppContext *)timer->user_data;
+    if (!ctx || ctx->wifi_scan.paused) return;
 
-            context->scan_count++;
+    if (millis() - ctx->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS) {
+        run_ap_scan(ctx);
+        ctx->wifi_scan.last_scan_ms = millis();
+    }
+    
+    // Check if scan is complete
+    int16_t n = WiFi.scanComplete();
+    if (n >= 0) {
+        if (ctx->wifi_scan.mutex && xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            ctx->wifi_scan.ap_count = 0;
+            for (int i = 0; i < n && i < MAX_APS; i++) {
+                APRecord &r = ctx->wifi_scan.ap_list[i];
+                strncpy(r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
+                r.ssid[sizeof(r.ssid) - 1] = '\0';
+                memcpy(r.bssid, WiFi.BSSID(i), 6);
+                r.rssi = WiFi.RSSI(i);
+                r.channel = WiFi.channel(i);
+                r.enc = WiFi.encryptionType(i);
+                r.active = true;
+                ctx->wifi_scan.ap_count++;
+            }
+            xSemaphoreGive(ctx->wifi_scan.mutex);
         }
-
         WiFi.scanDelete();
-
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        render_scan_list(ctx);
     }
 }

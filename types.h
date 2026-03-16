@@ -109,6 +109,7 @@ struct ScanState {
   int deauth_sta_target; // Used in pentest_attacks.cpp
   bool started; // Added for scan state
   lv_timer_t* scan_timer; // Added for scan timer handle
+  SemaphoreHandle_t mutex; // Added for thread-safe access to ap_list/sta_list
 };
 
 // Define PentestState

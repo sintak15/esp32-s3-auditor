@@ -1,8 +1,8 @@
 #pragma once
 
 // UI
-#define SCREEN_W 320
-#define SCREEN_H 240
+#define SCREEN_W 240
+#define SCREEN_H 320
 #define LV_COLOR_DARK_BG 0x111111
 #define LV_COLOR_LIGHT_BG 0x181818
 #define LV_COLOR_RED 0xFF0000

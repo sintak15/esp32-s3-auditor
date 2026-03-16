@@ -18,8 +18,8 @@ void pcap_and_probes_init(AppContext* context) {
 }
 
 void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
-    if (!g_app_context.sniffer.pcap_queue) return; // Assuming g_app_context is globally available
-    SnifferState& sniffer = g_app_context.sniffer;
+    if (!sniffer_context || !sniffer_context->sniffer.pcap_queue) return;
+    SnifferState& sniffer = sniffer_context->sniffer;
 
     if (!sniffer.pcap_active && !sniffer.probe_active) return;
     
@@ -104,11 +104,13 @@ void process_channel_hop(AppContext* context) {
 void start_pcap(AppContext* context) {
     if (context->sniffer.pcap_active) return; // Already active
     context->sniffer.pcap_active = true;
-    // Ensure WiFi is in STA mode for promiscuous to work correctly
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+    
+    if (!context->sniffer.probe_active) {
+        WiFi.mode(WIFI_STA);
+        WiFi.disconnect();
+        esp_wifi_set_promiscuous(true);
+        esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+    }
     
     if (!sd_card_ready()) {
         Serial.println("[PCAP] SD card not ready, cannot open file.");
@@ -129,7 +131,10 @@ void start_pcap(AppContext* context) {
 void stop_pcap(AppContext* context) {
     if (!context->sniffer.pcap_active) return;
     context->sniffer.pcap_active = false;
-    esp_wifi_set_promiscuous(false);
+    if (!context->sniffer.probe_active) {
+        esp_wifi_set_promiscuous(false);
+        esp_wifi_set_promiscuous_rx_cb(nullptr);
+    }
     sd_logger_pcap_file_close(context); // Corrected function call
     if (btn_pcap_start) lv_label_set_text(lv_obj_get_child(btn_pcap_start, 0), "START PCAP");
     lv_label_set_text(lbl_pcap_status, "#00FF88 Capture saved to SD#");
@@ -138,10 +143,12 @@ void stop_pcap(AppContext* context) {
 void start_probe_sniffer(AppContext* context) {
     if (context->sniffer.probe_active) return; // Already active
     context->sniffer.probe_active = true;
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+    if (!context->sniffer.pcap_active) {
+        WiFi.mode(WIFI_STA);
+        WiFi.disconnect();
+        esp_wifi_set_promiscuous(true);
+        esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+    }
     context->sniffer.unique_probes.clear();
     if (probe_list) lv_obj_clean(probe_list);
     // UI button text update handled in cb_toggle_probes in .ino
@@ -150,6 +157,9 @@ void start_probe_sniffer(AppContext* context) {
 void stop_probe_sniffer(AppContext* context) {
     if (!context->sniffer.probe_active) return;
     context->sniffer.probe_active = false;
-    esp_wifi_set_promiscuous(false);
+    if (!context->sniffer.pcap_active) {
+        esp_wifi_set_promiscuous(false);
+        esp_wifi_set_promiscuous_rx_cb(nullptr);
+    }
     if (btn_probe_start) lv_label_set_text(lv_obj_get_child(btn_probe_start, 0), "START PROBE SNIFF");
 }

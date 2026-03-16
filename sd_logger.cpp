@@ -1,9 +1,7 @@
 #include "sd_logger.h"
 #include "constants.h"
 #include <SD_MMC.h>
-
-// Forward declaration for enc_str from wifi_scanner.cpp
-extern const char* enc_str(uint8_t enc);
+#include "wifi_scanner.h"
 
 static bool sd_ready = false;
 
@@ -54,18 +52,23 @@ void sd_log_scan(AppContext* context) {
     double lat = gs.locValid ? gs.lat : 0.0;
     double lon = gs.locValid ? gs.lon : 0.0;
     
-    for (int i = 0; i < context->wifi_scan.ap_count; i++) {
-        if (context->wifi_scan.ap_list[i].active) {
-            char bss[18];
-            sprintf(bss, "%02X:%02X:%02X:%02X:%02X:%02X", 
-                context->wifi_scan.ap_list[i].bssid[0], context->wifi_scan.ap_list[i].bssid[1],
-                context->wifi_scan.ap_list[i].bssid[2], context->wifi_scan.ap_list[i].bssid[3],
-                context->wifi_scan.ap_list[i].bssid[4], context->wifi_scan.ap_list[i].bssid[5]);
-            
-            f.printf("%.6f,%.6f,\"%s\",%s,%d,%d,%s\n",
-                     lat, lon, context->wifi_scan.ap_list[i].ssid, bss,
-                     context->wifi_scan.ap_list[i].rssi, context->wifi_scan.ap_list[i].channel,
-                     enc_str(context->wifi_scan.ap_list[i].enc));
+    if (context && context->wifi_scan.mutex) {
+        if (xSemaphoreTake(context->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            for (int i = 0; i < context->wifi_scan.ap_count; i++) {
+                if (context->wifi_scan.ap_list[i].active) {
+                    char bss[18];
+                    sprintf(bss, "%02X:%02X:%02X:%02X:%02X:%02X", 
+                        context->wifi_scan.ap_list[i].bssid[0], context->wifi_scan.ap_list[i].bssid[1],
+                        context->wifi_scan.ap_list[i].bssid[2], context->wifi_scan.ap_list[i].bssid[3],
+                        context->wifi_scan.ap_list[i].bssid[4], context->wifi_scan.ap_list[i].bssid[5]);
+                    
+                    f.printf("%.6f,%.6f,\"%s\",%s,%d,%d,%s\n",
+                             lat, lon, context->wifi_scan.ap_list[i].ssid, bss,
+                             context->wifi_scan.ap_list[i].rssi, context->wifi_scan.ap_list[i].channel,
+                             enc_str(context->wifi_scan.ap_list[i].enc));
+                }
+            }
+            xSemaphoreGive(context->wifi_scan.mutex);
         }
     }
     f.close();
