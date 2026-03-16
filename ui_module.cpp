@@ -12,7 +12,7 @@ extern AppContext g_app_context;
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
 lv_obj_t *lbl_sd, *lbl_wifi, *lbl_gps_fix, *lbl_batt, *lbl_batt_pct;
-lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_gps, *tab_ble, *tab_pcap, *tab_probes, *tab_settings; // Consolidated tab declarations
+lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_gps, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora; // Consolidated tab declarations
 lv_obj_t *lbl_gps_info;
 lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
@@ -28,6 +28,9 @@ lv_obj_t *btn_ble_flood  = nullptr;
 lv_obj_t *btn_pcap_start = nullptr;
 lv_obj_t *ta_beacon_ssids = nullptr; // Text area for beacon SSIDs (declared here)
 lv_obj_t *btn_probe_start = nullptr;
+lv_obj_t *ta_lora_log = nullptr;
+lv_obj_t *ta_lora_input = nullptr;
+static lv_obj_t *kb = nullptr;
 
 lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
            style_btn_blue, style_view_active, style_view_inactive;
@@ -133,14 +136,15 @@ void ui_build() {
   tab_pcap    =lv_tabview_add_tab(tabview, "PCAP");
   tab_probes  =lv_tabview_add_tab(tabview, "Probes");
   tab_settings =lv_tabview_add_tab(tabview, "Settings");
+  tab_lora    =lv_tabview_add_tab(tabview, "LoRa");
   
-  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_pentest,tab_gps,tab_ble,tab_pcap,tab_probes,tab_settings,tv_cont};
+  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_pentest,tab_gps,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tv_cont};
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
   lv_obj_set_layout(tab_home, LV_LAYOUT_GRID);
   static lv_coord_t col_dsc[]={LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
-  static lv_coord_t row_dsc[]={LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
+  static lv_coord_t row_dsc[]={LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
   lv_obj_set_grid_dsc_array(tab_home, col_dsc, row_dsc);
 
   auto hub=[](lv_obj_t *p,const char *icon,const char *txt,int c,int r,lv_event_cb_t cb,uint32_t col) {
@@ -163,7 +167,8 @@ void ui_build() {
   hub(tab_home,LV_SYMBOL_BLUETOOTH, "BLE",     1,1,[](lv_event_t*){ navigate_to(4); },0x4444FF);
   hub(tab_home,LV_SYMBOL_FILE,      "PCAP",    0,2,[](lv_event_t*){ navigate_to(5); },0xFFFF00);
   hub(tab_home,LV_SYMBOL_EYE_OPEN,  "PROBES",  1,2,[](lv_event_t*){ navigate_to(6); },0xFF00FF);
-  hub(tab_home,LV_SYMBOL_SETTINGS,  "SETTINGS",0,2,[](lv_event_t*){ navigate_to(7); },0xAAAAAA); // New settings button
+  hub(tab_home,LV_SYMBOL_SETTINGS,  "SETTINGS",0,3,[](lv_event_t*){ navigate_to(7); },0xAAAAAA);
+  hub(tab_home,LV_SYMBOL_USB,       "LORA",    1,3,[](lv_event_t*){ navigate_to(8); },0x00AAFF);
 
   // ── Shared return-home button builder ─────────
   auto add_return_btn=[](lv_obj_t *parent) {
@@ -439,4 +444,49 @@ void ui_build() {
   lv_obj_t *lbl_save_ssids = lv_label_create(btn_save_ssids); lv_label_set_text(lbl_save_ssids, LV_SYMBOL_SAVE " SAVE SSIDs"); lv_obj_center(lbl_save_ssids);
 
   add_return_btn(tab_settings);
+
+  // ── LoRa Tab ──────────────────────────────────
+  lv_obj_set_style_pad_all(tab_lora, 5, 0);
+  lv_obj_t *lbl_lora_title = lv_label_create(tab_lora);
+  lv_label_set_text(lbl_lora_title, "#00AAFF Heltec V3 Terminal#");
+  lv_label_set_recolor(lbl_lora_title, true);
+  lv_obj_align(lbl_lora_title, LV_ALIGN_TOP_LEFT, 5, 0);
+
+  ta_lora_log = lv_textarea_create(tab_lora);
+  lv_obj_set_size(ta_lora_log, SCREEN_W - 10, 140);
+  lv_obj_align(ta_lora_log, LV_ALIGN_TOP_MID, 0, 25);
+  lv_textarea_set_text(ta_lora_log, "Awaiting LoRa serial data...\n");
+
+  ta_lora_input = lv_textarea_create(tab_lora);
+  lv_obj_set_size(ta_lora_input, SCREEN_W - 80, 40);
+  lv_obj_align(ta_lora_input, LV_ALIGN_TOP_LEFT, 5, 175);
+  lv_textarea_set_one_line(ta_lora_input, true);
+
+  extern void cb_send_lora(lv_event_t* e);
+  lv_obj_t *btn_lora_send = make_atk_btn(tab_lora, "SEND", &style_btn_blue, 0x00AAFF, cb_send_lora, 175);
+  lv_obj_set_size(btn_lora_send, 65, 40);
+  lv_obj_align(btn_lora_send, LV_ALIGN_TOP_RIGHT, -5, 175);
+  lv_obj_clear_flag(btn_lora_send, LV_OBJ_FLAG_HIDDEN);
+
+  // Setup Global Keyboard layer for the input
+  kb = lv_keyboard_create(main_screen);
+  lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_add_event_cb(ta_lora_input, [](lv_event_t *e) {
+      lv_event_code_t code = lv_event_get_code(e);
+      if (code == LV_EVENT_FOCUSED) {
+          lv_keyboard_set_textarea(kb, ta_lora_input);
+          lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
+      } else if (code == LV_EVENT_DEFOCUSED) {
+          lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+      } else if (code == LV_EVENT_READY) {
+          // Automatically send when the checkmark on the keyboard is pressed
+          extern void cb_send_lora(lv_event_t* e);
+          cb_send_lora(e);
+          lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_clear_state(ta_lora_input, LV_STATE_FOCUSED);
+      }
+  }, LV_EVENT_ALL, nullptr);
+
+  add_return_btn(tab_lora);
 }

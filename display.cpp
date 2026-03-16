@@ -6,6 +6,7 @@
 // Forward declare from ui_module
 extern lv_obj_t *lbl_batt, *lbl_batt_pct, *lbl_sd, *lbl_gps_fix, *lbl_wifi;
 extern lv_obj_t *lbl_gps_info;
+extern lv_obj_t *ta_lora_log;
 extern lv_obj_t* tabview;
 
 // Global objects for this module
@@ -158,6 +159,18 @@ void ui_update_tick(lv_timer_t *timer) {
     else if (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active) wc = 0xFF8800;
     else if (!ui_context->wifi_scan.paused) wc = 0x00FFFF;
     lv_obj_set_style_text_color(lbl_wifi, lv_color_hex(wc), 0);
+
+    // Update LoRa log in terminal
+    if (ta_lora_log && ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        if (ui_context->lora.updated) {
+            // Auto-clear buffer if it gets too large to prevent out-of-memory errors
+            if (strlen(ui_context->lora.log_data) > 1500) { strcpy(ui_context->lora.log_data, "--- Buffer Cleared ---\n"); }
+            lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data);
+            lv_textarea_set_cursor_pos(ta_lora_log, LV_TEXTAREA_CURSOR_LAST);
+            ui_context->lora.updated = false;
+        }
+        xSemaphoreGive(ui_context->lora.mutex);
+    }
 
     // GPS tab info (only update if the tab is active)
     if (lv_tabview_get_tab_act(tabview) == 3) {

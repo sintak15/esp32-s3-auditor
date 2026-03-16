@@ -166,6 +166,14 @@ struct StatusState {
   TaskHandle_t service_task; // Added for Status service task handle
 };
 
+// Define LoRa/Serial State
+struct LoraState {
+  SemaphoreHandle_t mutex;
+  TaskHandle_t service_task;
+  char log_data[2048]; // Buffer for incoming LoRa data
+  bool updated;
+};
+
 // Main AppContext
 struct AppContext {
   ScanState wifi_scan;
@@ -174,6 +182,7 @@ struct AppContext {
   BleState ble;
   GpsState gps;
   StatusState status;
+  LoraState lora;
   bool ui_busy; // Used in wifi_scanner.cpp
 };
 

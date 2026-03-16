@@ -19,8 +19,10 @@
 #define I2C_SCL 15 // Touch I2C SCL
 #define TOUCH_ADDR 0x38 // Touch controller I2C address
 #define TP_INT 17 // Touch interrupt pin
-#define GPS_RX_PIN 43
+#define GPS_RX_PIN 43 // GPS on the standard UART pins
 #define GPS_TX_PIN 44
+#define LORA_RX_PIN 14 // Unencumbered GPIO for Heltec
+#define LORA_TX_PIN 21 // Unencumbered GPIO for Heltec
 #define BATT_ADC 1 // ADC pin for battery voltage reading
 
 // WiFi Scanner
