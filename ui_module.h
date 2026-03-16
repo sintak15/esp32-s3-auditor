@@ -3,13 +3,10 @@
 #include <lvgl.h>
 #include "constants.h"
 
-// ──────────────────────────────────────────────
-// Shared UI Handles
-// ──────────────────────────────────────────────
 extern lv_obj_t *main_screen, *status_bar, *tabview;
 extern lv_obj_t *lbl_sd, *lbl_wifi, *lbl_gps_fix, *lbl_batt, *lbl_batt_pct;
 extern lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_gps;
-extern lv_obj_t *tab_ble, *tab_pcap, *tab_probes;
+extern lv_obj_t *tab_ble, *tab_pcap, *tab_probes, *tab_settings;
 extern lv_obj_t *lbl_gps_info;
 extern lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 extern lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
@@ -28,9 +25,6 @@ extern lv_obj_t *btn_probe_start;
 extern lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
                   style_btn_blue, style_view_active, style_view_inactive;
 
-// ──────────────────────────────────────────────
-// Functions & Callbacks
-// ──────────────────────────────────────────────
 void ui_build();
 void no_scroll(lv_obj_t *o);
 

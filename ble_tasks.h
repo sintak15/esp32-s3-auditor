@@ -1,11 +1,12 @@
 #pragma once
 
-#include "types.h" // Changed from state.h to types.h
+#include <NimBLEDevice.h>
+#include "types.h"
 
 class BLESniffCB : public NimBLEScanCallbacks {
 public:
-    BLESniffCB(AppContext* context);
-    void onResult(const NimBLEAdvertisedDevice *dev) override;
+    explicit BLESniffCB(AppContext* context);
+    void onResult(const NimBLEAdvertisedDevice* dev) override;
 private:
     AppContext* app_context;
 };
