@@ -24,6 +24,7 @@
 #define MAX_APS                 40
 #define MAX_STAS                60
 #define STA_TIMEOUT_MS          30000
+#define AP_SCAN_INTERVAL_MS     5000 // Interval for AP scanning
 #define SCAN_INTERVAL_MS        5000
 #define MAX_LIST_MEMORY         500
 #define BEACON_SSID_COUNT       10

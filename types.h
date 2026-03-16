@@ -2,6 +2,14 @@
 
 #include <stdint.h>
 #include "constants.h"
+#include <set> // For std::set<String>
+#include <String.h> // For String
+#include <freertos/FreeRTOS.h> // For QueueHandle_t
+#include <freertos/semphr.h> // For SemaphoreHandle_t
+#include <lvgl.h> // For lv_timer_t (used in PentestState)
+#include <freertos/task.h> // For TaskHandle_t
+#include <NimBLEDevice.h> // For NimBLEScan (used in BleState)
+#include <FS.h> // For File (used in SnifferState)
 
 // ──────────────────────────────────────────────
 // Data Structures & Enums
@@ -25,6 +33,9 @@ struct StaRecord {
   bool     active;
 };
 
+// Forward declaration for AppContext (used in extern declaration)
+struct AppContext;
+
 struct TouchPoint { uint16_t x, y; bool pressed; };
 
 struct pcap_record_t {
@@ -44,6 +55,7 @@ struct pcap_packet_header {
 };
 
 enum ScanView { VIEW_AP, VIEW_STA, VIEW_LINKED };
+
 enum PentestMode { PT_NONE, PT_DEAUTH, PT_BEACON, PT_PMKID };
 
 struct GpsSnapshot {
@@ -63,3 +75,84 @@ struct StatusSnapshot {
 struct BLERing {
   char mac[18]; int8_t rssi; bool fresh;
 };
+
+// Define ScanState
+struct ScanState {
+  APRecord ap_list[MAX_APS];
+  int ap_count;
+  StaRecord sta_list[MAX_STAS];
+  int sta_count;
+  ScanView view;
+  bool paused;
+  uint32_t last_scan_ms; // Added to track last AP scan time
+  int selected_net; // Used in pentest_attacks.cpp
+  int deauth_sta_target; // Used in pentest_attacks.cpp
+  bool started; // Added for scan state
+  lv_timer_t* scan_timer; // Added for scan timer handle
+};
+
+// Define PentestState
+struct PentestState {
+  PentestMode current_mode;
+  lv_timer_t* pentest_timer;
+  int beacon_idx;
+  bool pmkid_found;
+  uint8_t pmkid_target_bssid[6]; // Used in pentest_attacks.cpp
+};
+
+// Define SnifferState
+struct SnifferState {
+  volatile bool pcap_active; // Made volatile for multi-task access
+  volatile bool probe_active; // Made volatile for multi-task access
+  QueueHandle_t pcap_queue;
+  QueueHandle_t probe_queue;
+  File pcap_file;
+  uint32_t pcap_packet_count;
+  uint32_t last_hop_ms;
+  uint8_t channel;
+  bool pcap_ch_locked; // Added for channel locking
+  uint8_t pcap_locked_ch; // Added for locked channel value
+  std::set<String> unique_probes;
+};
+
+// Define BleState
+struct BleState {
+  bool sniff_active;
+  bool flood_active;
+  bool busy;
+  bool nimble_ready;
+  NimBLEScan* scanner;
+  std::set<String> unique_macs;
+  uint32_t packet_count;
+  String last_mac;
+  BLERing ring_buf[BLE_RING_SIZE];
+  uint8_t ring_head;
+};
+
+// Define GpsState
+struct GpsState {
+  GpsSnapshot snap;
+  SemaphoreHandle_t mutex;
+  TaskHandle_t service_task; // Added for GPS service task handle
+};
+
+// Define StatusState
+struct StatusState {
+  StatusSnapshot snap;
+  SemaphoreHandle_t mutex;
+  TaskHandle_t service_task; // Added for Status service task handle
+};
+
+// Main AppContext
+struct AppContext {
+  ScanState wifi_scan;
+  PentestState pentest;
+  SnifferState sniffer;
+  BleState ble;
+  GpsState gps;
+  StatusState status;
+  bool ui_busy; // Used in wifi_scanner.cpp
+};
+
+// Global AppContext instance (needs to be defined in the main .ino file)
+extern AppContext g_app_context;

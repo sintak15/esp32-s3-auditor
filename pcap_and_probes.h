@@ -1,6 +1,6 @@
 #pragma once
 
-#include "state.h"
+#include "types.h" // Changed from state.h to types.h
 #include <esp_wifi_types.h>
 
 void pcap_and_probes_init(AppContext* context);
@@ -8,6 +8,8 @@ void pcap_and_probes_init(AppContext* context);
 void start_pcap(AppContext* context);
 void stop_pcap(AppContext* context);
 void process_pcap_queue(AppContext* context);
+
+void start_probe_sniffer(AppContext* context); // Added declaration
 
 void start_probe_sniffer(AppContext* context);
 void stop_probe_sniffer(AppContext* context);

@@ -1,14 +1,15 @@
 #include "pcap_and_probes.h"
 #include "constants.h"
-#include "sd_logger.h"
+#include "sd_logger.h" // sd_logger.h now includes types.h
 #include <WiFi.h>
 #include <esp_wifi.h>
 
-extern lv_obj_t *lbl_pcap_status, *probe_list, *btn_pcap_start, *btn_probe_start;
-extern bool pcap_ch_locked;
-extern uint8_t pcap_locked_ch;
+// Global AppContext instance (defined in main .ino file)
+extern AppContext g_app_context;
 
-static AppContext* sniffer_context = nullptr;
+extern lv_obj_t *lbl_pcap_status, *probe_list, *btn_pcap_start, *btn_probe_start;
+
+static AppContext* sniffer_context = nullptr; // Declaration for sniffer_context
 
 void pcap_and_probes_init(AppContext* context) {
     sniffer_context = context;
@@ -17,8 +18,8 @@ void pcap_and_probes_init(AppContext* context) {
 }
 
 void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
-    if (!sniffer_context) return;
-    SnifferState& sniffer = sniffer_context->sniffer;
+    if (!g_app_context.sniffer.pcap_queue) return; // Assuming g_app_context is globally available
+    SnifferState& sniffer = g_app_context.sniffer;
 
     if (!sniffer.pcap_active && !sniffer.probe_active) return;
     
@@ -52,8 +53,8 @@ void process_pcap_queue(AppContext* context) {
     if (!context->sniffer.pcap_active || !context->sniffer.pcap_file) return;
     pcap_record_t rec;
     int writes = 0;
-    while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0)) {
-        pcap_file_write(&rec);
+    while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0) == pdTRUE) {
+        sd_logger_pcap_file_write(&rec); // Corrected function call
         context->sniffer.pcap_packet_count++;
         if (++writes >= 50) break; // Don't block the main loop for too long
     }
@@ -64,10 +65,10 @@ void process_probe_queue(AppContext* context) {
     char sb[PROBE_MAX_SSID_LEN + 1];
     while (xQueueReceive(context->sniffer.probe_queue, sb, 0)) {
         String s(sb);
-        if (s.length() > 0 && context->sniffer.unique_probes.find(s) == context->sniffer.unique_probes.end()) {
+        if (s.length() > 0 && s.length() <= PROBE_MAX_SSID_LEN && context->sniffer.unique_probes.find(s) == context->sniffer.unique_probes.end()) {
             if (context->sniffer.unique_probes.size() > MAX_LIST_MEMORY) {
                 context->sniffer.unique_probes.clear();
-                lv_obj_clean(probe_list);
+                if (probe_list) lv_obj_clean(probe_list); // Guard against probe_list not being initialized
             }
             context->sniffer.unique_probes.insert(s);
             lv_list_add_text(probe_list, s.c_str());
@@ -81,31 +82,68 @@ void process_probe_queue(AppContext* context) {
 void process_channel_hop(AppContext* context) {
     if (!context->sniffer.pcap_active && !context->sniffer.probe_active) return;
     if (millis() - context->sniffer.last_hop_ms < CHANNEL_HOP_INTERVAL_MS) return;
-    
-    if (!pcap_ch_locked) { // This external global will be moved to context later
+
+    if (!context->sniffer.pcap_ch_locked) { // Use context->sniffer.pcap_ch_locked
         context->sniffer.channel++;
         if (context->sniffer.channel > 13) context->sniffer.channel = 1;
     } else {
-        context->sniffer.channel = pcap_locked_ch;
+        context->sniffer.channel = context->sniffer.pcap_locked_ch;
     }
     
     esp_wifi_set_channel(context->sniffer.channel, WIFI_SECOND_CHAN_NONE);
     context->sniffer.last_hop_ms = millis();
     
     if (context->sniffer.pcap_active) {
-        lv_label_set_text_fmt(lbl_pcap_status, "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu",
-                              pcap_ch_locked ? "#FF8800 LOCKED# " : "",
+        lv_label_set_text_fmt(lbl_pcap_status, "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu", // Use context->sniffer.pcap_ch_locked
+                              context->sniffer.pcap_ch_locked ? "#FF8800 LOCKED# " : "",
                               context->sniffer.channel, context->sniffer.pcap_packet_count);
     }
+}
+
+void start_pcap(AppContext* context) {
+    if (context->sniffer.pcap_active) return; // Already active
+    context->sniffer.pcap_active = true;
+    // Ensure WiFi is in STA mode for promiscuous to work correctly
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+    
+    if (!sd_card_ready()) {
+        Serial.println("[PCAP] SD card not ready, cannot open file.");
+        context->sniffer.pcap_active = false;
+        return;
+    }
+    if (!sd_logger_pcap_file_open(context)) { // Use sd_logger's function
+        Serial.println("[PCAP] Failed to open PCAP file.");
+        context->sniffer.pcap_active = false;
+        return;
+    }
+    context->sniffer.pcap_packet_count = 0;
+    context->sniffer.channel = 1;
+    context->sniffer.last_hop_ms = 0;
+    // UI button text update handled in cb_toggle_pcap in .ino
 }
 
 void stop_pcap(AppContext* context) {
     if (!context->sniffer.pcap_active) return;
     context->sniffer.pcap_active = false;
     esp_wifi_set_promiscuous(false);
-    pcap_file_close();
+    sd_logger_pcap_file_close(); // Corrected function call
     if (btn_pcap_start) lv_label_set_text(lv_obj_get_child(btn_pcap_start, 0), "START PCAP");
     lv_label_set_text(lbl_pcap_status, "#00FF88 Capture saved to SD#");
+}
+
+void start_probe_sniffer(AppContext* context) {
+    if (context->sniffer.probe_active) return; // Already active
+    context->sniffer.probe_active = true;
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+    context->sniffer.unique_probes.clear();
+    if (probe_list) lv_obj_clean(probe_list);
+    // UI button text update handled in cb_toggle_probes in .ino
 }
 
 void stop_probe_sniffer(AppContext* context) {

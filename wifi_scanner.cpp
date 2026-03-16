@@ -247,18 +247,18 @@ void render_scan_list(AppContext* context) {
             if (!state.sta_list[i].active) continue;
             char mac[18];
             mac_str(state.sta_list[i].mac, mac);
-            bool is_target = (context->pentest.deauth_sta_target == i);
+            bool is_target = (context->wifi_scan.deauth_sta_target == i); // Corrected access
             lv_obj_t *btn = lv_list_add_btn(scan_list, nullptr, "");
             lv_obj_set_user_data(btn, (void*)(intptr_t)i);
             lv_obj_add_event_cb(btn, [](lv_event_t *e) {
                 AppContext* ctx = scanner_context;
                 int idx = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e));
                 if (idx < 0 || idx >= ctx->wifi_scan.sta_count || !ctx->wifi_scan.sta_list[idx].active) return;
-                ctx->pentest.deauth_sta_target = (ctx->pentest.deauth_sta_target == idx) ? -1 : idx;
-                if (ctx->pentest.deauth_sta_target >= 0 && ctx->wifi_scan.sta_list[idx].hasAP) {
+                ctx->wifi_scan.deauth_sta_target = (ctx->wifi_scan.deauth_sta_target == idx) ? -1 : idx; // Corrected access
+                if (ctx->wifi_scan.deauth_sta_target >= 0 && ctx->wifi_scan.sta_list[idx].hasAP) { // Corrected access
                     for (int j = 0; j < ctx->wifi_scan.ap_count; j++) {
                         if (memcmp(ctx->wifi_scan.ap_list[j].bssid, ctx->wifi_scan.sta_list[idx].apBssid, 6) == 0) {
-                            ctx->pentest.selected_net = j;
+                            ctx->wifi_scan.selected_net = j; // Corrected access
                             break;
                         }
                     }
@@ -350,12 +350,12 @@ void scan_tick(lv_timer_t * timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context || context->ui_busy || context->wifi_scan.paused || context->pentest.current_mode != PT_NONE) return;
     if (!tabview || !scan_list) return;
-    if (lv_tabview_get_tab_act(tabview) != 1) return;
+    if (lv_tabview_get_tab_act(tabview) != 1) return; // Assuming tab 1 is the scan tab
     
-    expire_stas(context);
+    expire_stas(context); // Remove old STAs
     uint32_t now = millis();
-    if (now - context->wifi_scan.last_scan_ms >= SCAN_INTERVAL_MS) {
-        run_ap_scan(context);
+    if (now - context->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS) { // AP_SCAN_INTERVAL_MS defined in constants.h
+        run_ap_scan(context); // This function performs the AP scan
         context->wifi_scan.last_scan_ms = now;
     }
     render_scan_list(context);

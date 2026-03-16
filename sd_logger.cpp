@@ -78,13 +78,10 @@ void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl
     hex(pmkid, 16, ph);
     hex(ap_mac, 6, ah);
     hex(cl_mac, 6, ch);
-    int sl = strlen(ssid);
-    if (sl > 32) sl = 32;
-    hex((const uint8_t*)ssid, sl, sh);
 
     File f1 = SD_MMC.open(PMKID_HASH_LOG, FILE_APPEND);
     if (f1) {
-        f1.printf("PMKID*%s*%s*%s\n", ph, ah, sh);
+        f1.printf("PMKID*%s*%s*%s\n", ph, ah, ssid); // Hashcat expects raw SSID
         f1.close();
     }
     File f2 = SD_MMC.open(PMKID_CSV_LOG, FILE_APPEND);
@@ -115,38 +112,38 @@ void sd_log_probe(const char* ssid) {
 
 // --- PCAP File Management ---
 
-static File pcap_file;
+static File sd_logger_pcap_file_handle; // Renamed to avoid collision
 
-bool pcap_file_open(AppContext* context) {
+bool sd_logger_pcap_file_open(AppContext* context) { // Renamed function
     if (!sd_ready) return false;
     char fn[32];
     sprintf(fn, "/cap_%lu.pcap", millis());
-    pcap_file = SD_MMC.open(fn, FILE_WRITE);
-    if (pcap_file) {
+    sd_logger_pcap_file_handle = SD_MMC.open(fn, FILE_WRITE); // Use renamed handle
+    if (sd_logger_pcap_file_handle) {
         pcap_global_header gh = {0xa1b2c3d4, 2, 4, 0, 0, 65535, 105};
-        pcap_file.write((uint8_t*)&gh, sizeof(gh));
-        pcap_file.flush();
-        context->sniffer.pcap_file = pcap_file;
+        sd_logger_pcap_file_handle.write((uint8_t*)&gh, sizeof(gh));
+        sd_logger_pcap_file_handle.flush();
+        context->sniffer.pcap_file = sd_logger_pcap_file_handle;
         return true;
     }
     return false;
 }
 
-void pcap_file_write(pcap_record_t* record) {
-    if (pcap_file) {
+void sd_logger_pcap_file_write(pcap_record_t* record) { // Renamed function
+    if (sd_logger_pcap_file_handle) {
         pcap_packet_header h;
         h.ts_sec = record->ts_sec;
         h.ts_usec = record->ts_usec;
         h.incl_len = record->len;
         h.orig_len = record->len;
-        pcap_file.write((uint8_t*)&h, sizeof(h));
-        pcap_file.write(record->payload, record->len);
+        sd_logger_pcap_file_handle.write((uint8_t*)&h, sizeof(h));
+        sd_logger_pcap_file_handle.write(record->payload, record->len);
     }
 }
 
-void pcap_file_close() {
-    if (pcap_file) {
-        pcap_file.flush();
-        pcap_file.close();
+void sd_logger_pcap_file_close() { // Renamed function
+    if (sd_logger_pcap_file_handle) {
+        sd_logger_pcap_file_handle.flush();
+        sd_logger_pcap_file_handle.close();
     }
 }

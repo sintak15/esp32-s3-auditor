@@ -36,23 +36,6 @@ void ble_tasks_init(AppContext* context) {
 void stop_ble(AppContext* context) {
     if (!context->ble.sniff_active && !context->ble.flood_active) return;
 
-    uint32_t wait_start = millis();
-    while (context->ble.busy && millis() - wait_start < 500) {
-        esp_task_wdt_reset();
-        delay(5);
-    }
-    if (context->ble.busy) {
-        // Force-clear stuck state
-        context->ble.flood_active = false;
-        context->ble.sniff_active = false;
-        context->ble.nimble_ready = false;
-        context->ble.busy = false;
-        if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
-        if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
-        lv_label_set_text(lbl_ble_status, "#FF4444 BLE ERROR — rebooting may be needed#");
-        return;
-    }
-
     context->ble.busy = true;
 
     if (context->ble.sniff_active) {
@@ -62,27 +45,30 @@ void stop_ble(AppContext* context) {
             context->ble.scanner->stop();
         }
         esp_task_wdt_reset(); delay(200); esp_task_wdt_reset();
-        if (context->ble.nimble_ready) {
-            NimBLEDevice::deinit(true);
-            context->ble.nimble_ready = false;
-            context->ble.scanner = nullptr;
-        }
-        esp_task_wdt_reset(); delay(100); esp_task_wdt_reset();
         if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
     }
 
     if (context->ble.flood_active) {
         context->ble.flood_active = false;
-        if (context->ble.nimble_ready) {
-            // Stop advertising safely before deinit
-            NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-            if (adv) adv->stop();
-            esp_task_wdt_reset(); delay(50); esp_task_wdt_reset();
-            NimBLEDevice::deinit(true);
-            context->ble.nimble_ready = false;
-            esp_task_wdt_reset(); delay(50); esp_task_wdt_reset();
-        }
+        // Stop advertising safely before deinit
+        NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+        if (adv) adv->stop();
+        esp_task_wdt_reset(); delay(50); esp_task_wdt_reset();
         if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
+    }
+
+    // Always deinit if it was initialized, regardless of which mode was active
+    if (context->ble.nimble_ready) {
+        NimBLEDevice::deinit(true);
+        context->ble.nimble_ready = false;
+        context->ble.scanner = nullptr; // Ensure scanner is nulled after deinit
+        esp_task_wdt_reset(); delay(100); esp_task_wdt_reset();
+    } else {
+        // If nimble_ready was false but sniff/flood active, it means something went wrong.
+        // Log an error or handle it. For now, just ensure UI is reset.
+        if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
+        if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
+        lv_label_set_text(lbl_ble_status, "#FF4444 BLE ERROR — NimBLE state inconsistent#");
     }
 
     lv_label_set_text(lbl_ble_status, "#00FFCC BLE READY#\n\nSelect an action.");

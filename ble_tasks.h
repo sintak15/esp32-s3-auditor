@@ -1,6 +1,6 @@
 #pragma once
 
-#include "state.h"
+#include "types.h" // Changed from state.h to types.h
 
 class BLESniffCB : public NimBLEScanCallbacks {
 public:

@@ -28,10 +28,6 @@ extern lv_obj_t *btn_probe_start;
 extern lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
                   style_btn_blue, style_view_active, style_view_inactive;
 
-extern bool sdReady;
-extern bool pcap_ch_locked;
-extern uint8_t pcap_locked_ch;
-
 // ──────────────────────────────────────────────
 // Functions & Callbacks
 // ──────────────────────────────────────────────

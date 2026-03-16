@@ -1,6 +1,6 @@
 #pragma once
 
-#include "state.h"
+#include "types.h" // Changed from state.h to types.h
 #include <esp_wifi_types.h>
 
 void wifi_scanner_init(AppContext* context);

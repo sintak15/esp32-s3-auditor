@@ -1,6 +1,10 @@
 #include "ui_module.h"
 #include "sd_logger.h"
 #include <Arduino.h>
+#include "types.h" // Ensure types.h is included for AppContext definition
+
+// Global AppContext instance (defined in main .ino file)
+extern AppContext g_app_context;
 
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
@@ -24,9 +28,6 @@ lv_obj_t *btn_probe_start = nullptr;
 
 lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
            style_btn_blue, style_view_active, style_view_inactive;
-
-bool pcap_ch_locked = false;
-uint8_t pcap_locked_ch = 1;
 
 void no_scroll(lv_obj_t *o) {
   lv_obj_set_scrollbar_mode(o, LV_SCROLLBAR_MODE_OFF);
@@ -152,25 +153,21 @@ void ui_build() {
     lv_obj_t *lt=lv_label_create(b); lv_label_set_text(lt,txt);
     lv_obj_set_style_text_color(lt,lv_color_hex(0xCCCCCC),0);
   };
-  // ── Shared return-home button builder ─────────
-  // Must be declared before first use (GPS/BLE/PCAP/Probes tabs all call it)
-  struct RetBtn {
-    static void add(lv_obj_t *parent) {
-      lv_obj_t *b=lv_btn_create(parent); lv_obj_set_size(b,SCREEN_W-20,35);
-      lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-4); lv_obj_add_style(b,&style_btn_dark,0);
-      lv_obj_add_event_cb(b,cb_nav_home,LV_EVENT_CLICKED,nullptr);
-      lv_obj_t *l=lv_label_create(b); lv_label_set_text(l,LV_SYMBOL_HOME " RETURN HOME");
-      lv_obj_center(l);
-    }
-  };
-  auto add_return_btn = RetBtn::add;
-
   hub(tab_home,LV_SYMBOL_WIFI,      "SCAN",    0,0,cb_nav_scan,                                               0x00FFCC);
   hub(tab_home,LV_SYMBOL_WARNING,   "PENTEST", 1,0,[](lv_event_t*){ navigate_to(2); },0xFF4444);
   hub(tab_home,LV_SYMBOL_GPS,       "GPS",     0,1,[](lv_event_t*){ navigate_to(3); },0x00AAFF);
   hub(tab_home,LV_SYMBOL_BLUETOOTH, "BLE",     1,1,[](lv_event_t*){ navigate_to(4); },0x4444FF);
   hub(tab_home,LV_SYMBOL_FILE,      "PCAP",    0,2,[](lv_event_t*){ navigate_to(5); },0xFFFF00);
   hub(tab_home,LV_SYMBOL_EYE_OPEN,  "PROBES",  1,2,[](lv_event_t*){ navigate_to(6); },0xFF00FF);
+
+  // ── Shared return-home button builder ─────────
+  auto add_return_btn=[](lv_obj_t *parent) {
+    lv_obj_t *b=lv_btn_create(parent); lv_obj_set_size(b,SCREEN_W-20,35);
+    lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-4); lv_obj_add_style(b,&style_btn_dark,0);
+    lv_obj_add_event_cb(b,cb_nav_home,LV_EVENT_CLICKED,nullptr);
+    lv_obj_t *l=lv_label_create(b); lv_label_set_text(l,LV_SYMBOL_HOME " RETURN HOME");
+    lv_obj_center(l);
+  };
 
   // ── Scan Tab ──────────────────────────────────
   lv_obj_set_style_pad_all(tab_scan, 0, 0);
@@ -318,23 +315,25 @@ void ui_build() {
   lv_obj_set_flex_align(ch_row,LV_FLEX_ALIGN_SPACE_EVENLY,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
   no_scroll(ch_row);
   auto small_btn=[&](lv_obj_t *p,const char *l,lv_event_cb_t cb)->lv_obj_t* {
+    // Assuming g_app_context is globally available
+    extern AppContext g_app_context;
     lv_obj_t *b=lv_btn_create(p); lv_obj_set_size(b,36,30);
     lv_obj_add_style(b,&style_btn_dark,0);
     lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,nullptr);
     lv_obj_t *lb=lv_label_create(b); lv_label_set_text(lb,l); lv_obj_center(lb);
     return b;
   };
-  small_btn(ch_row,"-",[](lv_event_t*) {
-    if (pcap_locked_ch>1) pcap_locked_ch--;
-    char buf[8]; snprintf(buf,sizeof(buf),"CH %d",pcap_locked_ch);
+  small_btn(ch_row,"-",[](lv_event_t*) { // Use g_app_context.sniffer.pcap_locked_ch
+    if (g_app_context.sniffer.pcap_locked_ch > 1) g_app_context.sniffer.pcap_locked_ch--;
+    char buf[8]; snprintf(buf,sizeof(buf),"CH %d",g_app_context.sniffer.pcap_locked_ch);
     lv_label_set_text(lbl_pcap_ch,buf);
   });
   lbl_pcap_ch=lv_label_create(ch_row);
-  lv_label_set_text(lbl_pcap_ch,"CH 1");
+  lv_label_set_text(lbl_pcap_ch,"CH 1"); // Initial value, will be updated by process_channel_hop
   lv_obj_set_style_text_color(lbl_pcap_ch,lv_color_hex(0xFFFF00),0);
   small_btn(ch_row,"+",[](lv_event_t*) {
-    if (pcap_locked_ch<13) pcap_locked_ch++;
-    char buf[8]; snprintf(buf,sizeof(buf),"CH %d",pcap_locked_ch);
+    if (g_app_context.sniffer.pcap_locked_ch < 13) g_app_context.sniffer.pcap_locked_ch++;
+    char buf[8]; snprintf(buf,sizeof(buf),"CH %d",g_app_context.sniffer.pcap_locked_ch);
     lv_label_set_text(lbl_pcap_ch,buf);
   });
   btn_pcap_lock=lv_btn_create(ch_row); lv_obj_set_size(btn_pcap_lock,68,30);
@@ -342,9 +341,9 @@ void ui_build() {
   lv_obj_set_style_border_color(btn_pcap_lock,lv_color_hex(0x00FF88),0);
   lv_obj_set_style_border_width(btn_pcap_lock,1,0);
   lv_obj_add_event_cb(btn_pcap_lock,[](lv_event_t*) {
-    pcap_ch_locked=!pcap_ch_locked;
+    g_app_context.sniffer.pcap_ch_locked = !g_app_context.sniffer.pcap_ch_locked;
     lv_obj_t *lb=lv_obj_get_child(btn_pcap_lock,0);
-    if (pcap_ch_locked) {
+    if (g_app_context.sniffer.pcap_ch_locked) {
       lv_label_set_text(lb,"LOCKED");
       lv_obj_set_style_bg_color(btn_pcap_lock,lv_color_hex(0x2A1500),0);
       lv_obj_set_style_border_color(btn_pcap_lock,lv_color_hex(0xFF8800),0);

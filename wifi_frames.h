@@ -75,4 +75,5 @@ struct __attribute__((packed)) WpaVendorIe {
     uint8_t oui[3];     // 00-0F-AC for WPA
     uint8_t type;       // 0x04 for PMKID
     // Data follows
+    uint8_t data[0]; // Flexible array member for PMKID data
 };
