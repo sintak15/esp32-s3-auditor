@@ -4,6 +4,21 @@
 #include <stdint.h>
 #include <string.h>
 
+enum LocalUiEventType {
+    UI_EVT_SET_PCAP_BUTTON,
+    UI_EVT_SET_BLE_FLOOD_BUTTON,
+    UI_EVT_SET_BLE_SNIFF_BUTTON,
+    UI_EVT_SET_PROBE_BUTTON,
+    UI_EVT_SET_SCAN_PAUSE,
+    UI_EVT_NAVIGATE
+};
+
+struct LocalUiEvent {
+    LocalUiEventType type;
+    char text[96];
+    int tab_id;
+};
+
 struct UiEvent {
     enum Type {
         ADD_PROBE,
