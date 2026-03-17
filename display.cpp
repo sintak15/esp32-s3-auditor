@@ -445,7 +445,7 @@ void ui_update_tick(lv_timer_t *timer) {
 
     if (millis() - t_stage > 5) Serial.printf("[UI] misc block %lu ms\n", (unsigned long)(millis() - t_stage));
 
-    uint32_t dt = millis() - t0;
+    uint32_t dt = millis() - start;
     if (dt > 10) {
         Serial.printf("[UI] ui_update_tick %lu ms\n", (unsigned long)dt);
     }
