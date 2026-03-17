@@ -34,12 +34,13 @@ const char* enc_str(uint8_t enc) {
 }
 
 void restore_sta_sniffer(AppContext *ctx) {
-    // Re-enable promiscuous mode if needed for STAs
-    esp_wifi_set_promiscuous(true);
+    // Deprecated: Promiscuous mode is now safely toggled dynamically by run_ap_scan and scan_tick
 }
 
 void run_ap_scan(AppContext *ctx) {
     if (!ctx) return;
+    // CRITICAL: Cannot scan while promiscuous mode is enabled, it will crash the ESP32
+    esp_wifi_set_promiscuous(false);
     WiFi.scanNetworks(true); // async scan
 }
 
@@ -140,14 +141,14 @@ void scan_tick(lv_timer_t *timer) {
     AppContext *ctx = (AppContext *)timer->user_data;
     if (!ctx || ctx->wifi_scan.paused) return;
 
-    if (millis() - ctx->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS) {
-        run_ap_scan(ctx);
-        ctx->wifi_scan.last_scan_ms = millis();
-    }
-    
     // Check if scan is complete
     int16_t n = WiFi.scanComplete();
-    if (n >= 0) {
+
+    if (n == WIFI_SCAN_RUNNING) {
+        return; // Wait for the current scan to finish to prevent driver panic
+    }
+
+    if (n >= 0) { // Scan finished successfully
         if (ctx->wifi_scan.mutex && xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             ctx->wifi_scan.ap_count = 0;
             for (int i = 0; i < n && i < MAX_APS; i++) {
@@ -165,5 +166,20 @@ void scan_tick(lv_timer_t *timer) {
         }
         WiFi.scanDelete();
         render_scan_list(ctx);
+        
+        // Re-enable promiscuous mode after AP scan is fully processed to allow STA sniffing
+        if (!ctx->wifi_scan.paused) {
+            esp_wifi_set_promiscuous(true);
+        }
+    }
+    else if (n == WIFI_SCAN_FAILED) {
+        // Reset the scanner if it failed so it can try again cleanly
+        WiFi.scanDelete();
+    }
+
+    // Only start a new scan if enough time has passed and we aren't already scanning
+    if (millis() - ctx->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS) {
+        run_ap_scan(ctx);
+        ctx->wifi_scan.last_scan_ms = millis();
     }
 }

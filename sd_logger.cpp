@@ -5,6 +5,67 @@
 
 static bool sd_ready = false;
 
+enum LogTarget {
+    LOG_TARGET_SCAN,
+    LOG_TARGET_PMKID_HASH,
+    LOG_TARGET_PMKID_CSV,
+    LOG_TARGET_BLE,
+    LOG_TARGET_PROBE
+};
+
+#define MAX_LOG_LINE_LEN 128
+struct LogMsg {
+    LogTarget target;
+    char line[MAX_LOG_LINE_LEN];
+};
+static QueueHandle_t sd_log_queue = nullptr;
+
+const char* get_file_path(LogTarget target) {
+    switch(target) {
+        case LOG_TARGET_SCAN: return WIFI_SCAN_LOG;
+        case LOG_TARGET_PMKID_HASH: return PMKID_HASH_LOG;
+        case LOG_TARGET_PMKID_CSV: return PMKID_CSV_LOG;
+        case LOG_TARGET_BLE: return BLE_SNIFF_LOG;
+        case LOG_TARGET_PROBE: return PROBE_REQ_LOG;
+        default: return "/unknown.log";
+    }
+}
+
+static void sd_log_task(void* pvParameters) {
+    LogMsg msg;
+    while (true) {
+        // Block until a message is available in the queue
+        if (xQueueReceive(sd_log_queue, &msg, portMAX_DELAY) == pdTRUE) {
+            if (sd_ready) {
+                const char* path = get_file_path(msg.target);
+                File f = SD_MMC.open(path, FILE_APPEND);
+                if (f) {
+                    if (f.size() == 0) {
+                        if (msg.target == LOG_TARGET_SCAN) f.println("lat,lon,ssid,bssid,rssi,channel,enc");
+                        else if (msg.target == LOG_TARGET_PMKID_CSV) f.println("ssid,bssid,client,pmkid");
+                        else if (msg.target == LOG_TARGET_BLE) f.println("timestamp,mac,rssi");
+                    }
+                    f.print(msg.line);
+                    
+                    // Drain queued messages for the SAME target while the file is already open
+                    while (uxQueueMessagesWaiting(sd_log_queue) > 0) {
+                        LogMsg next_msg;
+                        if (xQueuePeek(sd_log_queue, &next_msg, 0) == pdTRUE) {
+                            if (next_msg.target == msg.target) {
+                                xQueueReceive(sd_log_queue, &next_msg, 0); // Consume it
+                                f.print(next_msg.line);
+                            } else {
+                                break; // Switch to a different file on the next loop iteration
+                            }
+                        }
+                    }
+                    f.close();
+                }
+            }
+        }
+    }
+}
+
 void sd_logger_init() {
     SD_MMC.setPins(38, 40, 39, 41, 48, 47);
     sd_ready = SD_MMC.begin("/sdcard", true);
@@ -17,6 +78,14 @@ void sd_logger_init() {
         Serial.println("[SD] card mounted");
     } else {
         Serial.println("[SD] card mount failed");
+    }
+
+    // Initialize the background logging task and queue
+    if (!sd_log_queue) {
+        sd_log_queue = xQueueCreate(128, sizeof(LogMsg));
+        if (sd_log_queue) {
+            xTaskCreate(sd_log_task, "sd_logger_task", 4096, nullptr, 1, nullptr);
+        }
     }
 }
 
@@ -33,49 +102,41 @@ void sd_reinit() {
     }
 }
 
-static GpsSnapshot read_gps_snapshot_sd(AppContext* context) {
-  GpsSnapshot s = {};
-  if (context && context->gps.mutex && xSemaphoreTake(context->gps.mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-    s = context->gps.snap;
-    xSemaphoreGive(context->gps.mutex);
-  }
-  return s;
-}
-
 void sd_log_scan(AppContext* context) {
-    if (!sd_ready) return;
-    File f = SD_MMC.open(WIFI_SCAN_LOG, FILE_APPEND);
-    if (!f) return;
-    if (f.size() == 0) f.println("lat,lon,ssid,bssid,rssi,channel,enc");
+    if (!sd_ready || !sd_log_queue) return;
     
-    GpsSnapshot gs = read_gps_snapshot_sd(context);
-    double lat = gs.locValid ? gs.lat : 0.0;
-    double lon = gs.locValid ? gs.lon : 0.0;
+    double lat = 0.0;
+    double lon = 0.0;
     
     if (context && context->wifi_scan.mutex) {
-        if (xSemaphoreTake(context->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        // Take the mutex just long enough to format the strings into the queue
+        if (xSemaphoreTake(context->wifi_scan.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
             for (int i = 0; i < context->wifi_scan.ap_count; i++) {
                 if (context->wifi_scan.ap_list[i].active) {
+                    LogMsg msg;
+                    msg.target = LOG_TARGET_SCAN;
                     char bss[18];
                     sprintf(bss, "%02X:%02X:%02X:%02X:%02X:%02X", 
                         context->wifi_scan.ap_list[i].bssid[0], context->wifi_scan.ap_list[i].bssid[1],
                         context->wifi_scan.ap_list[i].bssid[2], context->wifi_scan.ap_list[i].bssid[3],
                         context->wifi_scan.ap_list[i].bssid[4], context->wifi_scan.ap_list[i].bssid[5]);
                     
-                    f.printf("%.6f,%.6f,\"%s\",%s,%d,%d,%s\n",
+                    snprintf(msg.line, sizeof(msg.line), "%.6f,%.6f,\"%s\",%s,%d,%d,%s\n",
                              lat, lon, context->wifi_scan.ap_list[i].ssid, bss,
                              context->wifi_scan.ap_list[i].rssi, context->wifi_scan.ap_list[i].channel,
                              enc_str(context->wifi_scan.ap_list[i].enc));
+
+                    // Send to background task without blocking the UI
+                    xQueueSend(sd_log_queue, &msg, 0); 
                 }
             }
             xSemaphoreGive(context->wifi_scan.mutex);
         }
     }
-    f.close();
 }
 
 void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl_mac, const char *ssid) {
-    if (!sd_ready) return;
+    if (!sd_ready || !sd_log_queue) return;
     auto hex = [](const uint8_t *b, int n, char *o) {
         for (int i = 0; i < n; i++) sprintf(o + i * 2, "%02x", b[i]);
         o[n * 2] = 0;
@@ -85,35 +146,31 @@ void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl
     hex(ap_mac, 6, ah);
     hex(cl_mac, 6, ch);
 
-    File f1 = SD_MMC.open(PMKID_HASH_LOG, FILE_APPEND);
-    if (f1) {
-        f1.printf("PMKID*%s*%s*%s\n", ph, ah, ssid); // Hashcat expects raw SSID
-        f1.close();
-    }
-    File f2 = SD_MMC.open(PMKID_CSV_LOG, FILE_APPEND);
-    if (f2) {
-        if (f2.size() == 0) f2.println("ssid,bssid,client,pmkid");
-        f2.printf("\"%s\",%s,%s,%s\n", ssid, ah, ch, ph);
-        f2.close();
-    }
+    LogMsg msg1;
+    msg1.target = LOG_TARGET_PMKID_HASH;
+    snprintf(msg1.line, sizeof(msg1.line), "PMKID*%s*%s*%s\n", ph, ah, ssid); // Hashcat expects raw SSID
+    xQueueSend(sd_log_queue, &msg1, 0);
+
+    LogMsg msg2;
+    msg2.target = LOG_TARGET_PMKID_CSV;
+    snprintf(msg2.line, sizeof(msg2.line), "\"%s\",%s,%s,%s\n", ssid, ah, ch, ph);
+    xQueueSend(sd_log_queue, &msg2, 0);
 }
 
 void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi) {
-    if (!sd_ready) return;
-    File f = SD_MMC.open(BLE_SNIFF_LOG, FILE_APPEND);
-    if (f) {
-        f.printf("%lu,%s,%d\n", timestamp, mac, rssi);
-        f.close();
-    }
+    if (!sd_ready || !sd_log_queue) return;
+    LogMsg msg;
+    msg.target = LOG_TARGET_BLE;
+    snprintf(msg.line, sizeof(msg.line), "%lu,%s,%d\n", timestamp, mac, rssi);
+    xQueueSend(sd_log_queue, &msg, 0);
 }
 
 void sd_log_probe(const char* ssid) {
-    if (!sd_ready) return;
-    File f = SD_MMC.open(PROBE_REQ_LOG, FILE_APPEND);
-    if (f) {
-        f.println(ssid);
-        f.close();
-    }
+    if (!sd_ready || !sd_log_queue) return;
+    LogMsg msg;
+    msg.target = LOG_TARGET_PROBE;
+    snprintf(msg.line, sizeof(msg.line), "%s\n", ssid);
+    xQueueSend(sd_log_queue, &msg, 0);
 }
 
 // --- PCAP File Management ---

@@ -95,8 +95,10 @@ void start_ble_sniff(AppContext* context) {
     }
     esp_task_wdt_reset(); delay(50); esp_task_wdt_reset();
 
-    NimBLEDevice::init("");
-    context->ble.nimble_ready = true;
+    if (!context->ble.nimble_ready) {
+        NimBLEDevice::init("");
+        context->ble.nimble_ready = true;
+    }
     context->ble.scanner = NimBLEDevice::getScan();
     context->ble.scanner->setScanCallbacks(ble_sniffer_cb_instance, true);
     context->ble.scanner->setActiveScan(true);
@@ -148,12 +150,11 @@ void process_ble_sniff_ui(AppContext* context) {
         // The unique_macs set is updated in onResult.
         // Here, we just update the last_mac for display and log.
         // No need to re-insert into unique_macs here.
-        String current_mac_str(ble.ring_buf[i].mac);
-        ble.last_mac = current_mac_str;
+        ble.last_mac = ble.ring_buf[i].mac; // Assign const char* directly to avoid temporary String allocation
         
         // Log to SD card
         if (sd_card_ready()) {
-            sd_log_ble_sniff(millis(), current_mac_str.c_str(), ble.ring_buf[i].rssi);
+            sd_log_ble_sniff(millis(), ble.ring_buf[i].mac, ble.ring_buf[i].rssi);
         }
     }
 

@@ -59,15 +59,6 @@ enum ScanView { VIEW_AP, VIEW_STA, VIEW_LINKED };
 
 enum PentestMode { PT_NONE, PT_DEAUTH, PT_BEACON, PT_PMKID };
 
-struct GpsSnapshot {
-  bool locValid, timeValid, dateValid, altValid;
-  bool speedValid, courseValid, hdopValid, satsValid;
-  double lat, lon, altMeters, speedKmph, courseDeg, hdop;
-  uint32_t sats, charsProcessed;
-  uint8_t hour, minute, second, day, month;
-  uint16_t year;
-};
-
 // Custom struct for MAC addresses to avoid String overhead in std::set
 struct MacAddress {
   uint8_t data[6];
@@ -90,6 +81,7 @@ struct ProbeSsid {
 struct StatusSnapshot {
   bool sdMounted;
   int  batteryPct;
+  bool isCharging;
 };
 
 struct BLERing {
@@ -152,13 +144,6 @@ struct BleState {
   uint8_t ring_head;
 };
 
-// Define GpsState
-struct GpsState {
-  GpsSnapshot snap;
-  SemaphoreHandle_t mutex;
-  TaskHandle_t service_task; // Added for GPS service task handle
-};
-
 // Define StatusState
 struct StatusState {
   StatusSnapshot snap;
@@ -166,12 +151,40 @@ struct StatusState {
   TaskHandle_t service_task; // Added for Status service task handle
 };
 
+// Define LoRa Stats
+struct LoraDeviceStats {
+  uint32_t my_node_num;
+  uint32_t uptime_seconds;
+  float channel_utilization;
+  float air_util_tx;
+  uint32_t num_packets_tx;
+  uint32_t num_packets_rx;
+  uint16_t num_online_nodes;
+  uint16_t num_total_nodes;
+  uint32_t battery_level;
+  float voltage;
+  bool updated;
+};
+
+struct NodeRecord {
+  uint32_t num;
+  char long_name[40];
+  uint32_t last_heard;
+  int8_t snr;
+};
+
 // Define LoRa/Serial State
 struct LoraState {
   SemaphoreHandle_t mutex;
   TaskHandle_t service_task;
   char log_data[2048]; // Buffer for incoming LoRa data
-  bool updated;
+  char chat_data[2048]; // Buffer for LoRa chat
+  bool log_updated;
+  bool chat_updated;
+  bool nodedb_updated;
+  bool unread_chat;
+  LoraDeviceStats stats;
+  std::vector<NodeRecord> known_nodes;
 };
 
 // Main AppContext
@@ -180,10 +193,10 @@ struct AppContext {
   PentestState pentest;
   SnifferState sniffer;
   BleState ble;
-  GpsState gps;
   StatusState status;
   LoraState lora;
   bool ui_busy; // Used in wifi_scanner.cpp
+  bool web_server_active;
 };
 
 // Global AppContext instance (needs to be defined in the main .ino file)

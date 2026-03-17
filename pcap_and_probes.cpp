@@ -44,7 +44,7 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
                 // Create a ProbeSsid struct and send it
                 ProbeSsid probe_data;
                 memcpy(probe_data.data, &frame[26], sl);
-                probe_data.data[PROBE_MAX_SSID_LEN] = '\0'; // Ensure null termination
+                probe_data.data[sl] = '\0'; // Ensure null termination
                 xQueueSendFromISR(sniffer.probe_queue, &probe_data, NULL);
             }
         }
@@ -65,6 +65,7 @@ void process_pcap_queue(AppContext* context) {
 void process_probe_queue(AppContext* context) {
     if (!context->sniffer.probe_active) return;
     ProbeSsid received_probe_ssid; // Receive into a struct
+    int processed = 0;
     while (xQueueReceive(context->sniffer.probe_queue, &received_probe_ssid, 0) == pdTRUE) { // Pass address
         if (strlen(received_probe_ssid.data) > 0 && context->sniffer.unique_probes.find(received_probe_ssid) == context->sniffer.unique_probes.end()) {
             if (context->sniffer.unique_probes.size() > MAX_LIST_MEMORY) {
@@ -77,6 +78,7 @@ void process_probe_queue(AppContext* context) {
                 sd_log_probe(received_probe_ssid.data);
             }
         }
+        if (++processed >= 50) break; // Prevent stalling the main UI loop under heavy traffic
     }
 }
 

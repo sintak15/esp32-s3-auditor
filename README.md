@@ -21,15 +21,12 @@ A high-performance wireless auditing and penetration testing suite built for the
 * **Bluetooth (BLE) Module:**  
   * BLE Device Sniffing (Logs unique MACs and RSSI).  
   * Apple BLE Spam/Spoofing (Pop-up flooding).  
-* **GPS Wardriving:**  
-  * Live GPS tracking, coordinate mapping, and speed/heading readouts.
 
 ## **🛠️ Hardware Requirements**
 
 * **Microcontroller:** ESP32-S3 (with PSRAM enabled, OPI recommended)  
 * **Display:** 2.8" IPS TFT LCD (ST7789/ILI9341) with Capacitive/I2C Touch (CST8xx)  
 * **Storage:** SD/MMC Card Module (Required for PCAP and PMKID saving)  
-* **GPS:** Serial GPS Module (e.g., Neo-6M) wired to TX=IO44, RX=IO43
 
 ## **⚙️ Dependencies**
 
@@ -38,7 +35,6 @@ Install the following libraries in the Arduino IDE:
 * TFT\_eSPI (Configure User\_Setup.h for your specific display pins)  
 * lvgl (v8.3.x recommended)  
 * NimBLE-Arduino  
-* TinyGPSPlus
 
 ## **🚀 Installation & Build**
 
