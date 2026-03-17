@@ -24,6 +24,8 @@ static lv_disp_drv_t disp_drv;
 static lv_indev_drv_t indev_drv;
 static lv_color_t *lvgl_buf1 = nullptr;
 static lv_color_t *lvgl_buf2 = nullptr;
+static char* log_copy_buf = nullptr;
+static char* chat_copy_buf = nullptr;
 
 static AppContext* ui_context = nullptr;
 
@@ -155,6 +157,14 @@ void display_init() {
     }
     Serial.printf("[UI] Allocated %u bytes in PSRAM for LVGL buffer\n", buf_pixels * sizeof(lv_color_t));
 
+    log_copy_buf = (char *)ps_calloc(2048, 1);
+    chat_copy_buf = (char *)ps_calloc(2048, 1);
+    if (!log_copy_buf || !chat_copy_buf) {
+        Serial.println("[FATAL] PSRAM alloc failed for LoRa copy buffers");
+        while(1) delay(1000);
+    }
+    Serial.println("[UI] LoRa copy buffers allocated in PSRAM (4KB total)");
+
     lv_disp_draw_buf_init(&draw_buf, lvgl_buf1, nullptr, buf_pixels);
     lv_disp_drv_init(&disp_drv);
     disp_drv.hor_res = SCREEN_W;
@@ -264,11 +274,12 @@ void ui_update_tick(lv_timer_t *timer) {
                 }
                 
                 // Create a safe copy to prevent race conditions during UI update
-                static char log_copy[2048];
-                strncpy(log_copy, ui_context->lora.log_data, sizeof(log_copy) - 1);
-                log_copy[sizeof(log_copy) - 1] = '\0';
-                
-                lv_textarea_set_text(ta_lora_log, log_copy);
+                if (log_copy_buf) {
+                    strncpy(log_copy_buf, ui_context->lora.log_data, 2047);
+                    log_copy_buf[2047] = '\0';
+                    
+                    lv_textarea_set_text(ta_lora_log, log_copy_buf);
+                }
                 lv_indev_t * indev = lv_indev_get_next(NULL);
                 if (!((indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(ta_lora_log))) {
                     lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF);
@@ -291,11 +302,12 @@ void ui_update_tick(lv_timer_t *timer) {
                     chat_len = strlen(ui_context->lora.chat_data);
                 }
                 
-                static char chat_copy[2048];
-                strncpy(chat_copy, ui_context->lora.chat_data, sizeof(chat_copy) - 1);
-                chat_copy[sizeof(chat_copy) - 1] = '\0';
-                
-                lv_textarea_set_text(ta_lora_chat, chat_copy);
+                if (chat_copy_buf) {
+                    strncpy(chat_copy_buf, ui_context->lora.chat_data, 2047);
+                    chat_copy_buf[2047] = '\0';
+                    
+                    lv_textarea_set_text(ta_lora_chat, chat_copy_buf);
+                }
                 lv_indev_t * indev = lv_indev_get_next(NULL);
                 if (!((indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(ta_lora_chat))) {
                     lv_obj_scroll_to_y(ta_lora_chat, LV_COORD_MAX, LV_ANIM_OFF);
