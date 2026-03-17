@@ -61,6 +61,8 @@ void process_pcap_queue(AppContext* context) {
     if (!context->sniffer.pcap_active || !context->sniffer.pcap_file) return;
     pcap_record_t rec;
     int writes = 0;
+    uint32_t start = millis();
+
     while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0) == pdTRUE) { // Pass address
         sd_logger_pcap_file_write(context, &rec); // Corrected function call
         context->sniffer.pcap_packet_count++;
@@ -69,6 +71,13 @@ void process_pcap_queue(AppContext* context) {
         if ((++writes & 3) == 0) vTaskDelay(1); 
         if (writes >= 8) break; // Ultra-strict cap to guarantee no lv_timer_handler starvation
     }
+    
+    if (writes > 0) {
+        Serial.printf("[DIAG] pcap drained=%d remain=%u dt=%lu\n",
+                      writes,
+                      context->sniffer.pcap_queue ? uxQueueMessagesWaiting(context->sniffer.pcap_queue) : 0,
+                      (unsigned long)(millis() - start));
+    }
 }
 
 void process_probe_queue(AppContext* context) {
@@ -76,7 +85,10 @@ void process_probe_queue(AppContext* context) {
     ProbeSsid received_probe_ssid; // Receive into a struct
     int processed = 0;
     int ui_added = 0; // Cap UI churn
+    uint32_t start = millis();
+    
     while (xQueueReceive(context->sniffer.probe_queue, &received_probe_ssid, 0) == pdTRUE) { // Pass address
+        processed++;
         if (strlen(received_probe_ssid.data) > 0 && context->sniffer.unique_probes.find(received_probe_ssid) == context->sniffer.unique_probes.end()) {
             if (context->sniffer.unique_probes.size() > MAX_LIST_MEMORY) {
                 lv_indev_t * indev = lv_indev_get_next(NULL);
@@ -121,6 +133,14 @@ void process_probe_queue(AppContext* context) {
         // Yield briefly every 4 writes so the watchdog doesn't starve
         if ((++processed & 3) == 0) vTaskDelay(1);
         if (processed >= 8) break; // Ultra-strict cap to guarantee no lv_timer_handler starvation
+    }
+    
+    if (processed > 0) {
+        Serial.printf("[DIAG] probe drained=%d added=%d remain=%u unique=%u dt=%lu\n",
+                      processed, ui_added,
+                      context->sniffer.probe_queue ? uxQueueMessagesWaiting(context->sniffer.probe_queue) : 0,
+                      (unsigned)context->sniffer.unique_probes.size(),
+                      (unsigned long)(millis() - start));
     }
 }
 

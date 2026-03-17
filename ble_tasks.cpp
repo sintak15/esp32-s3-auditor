@@ -15,6 +15,18 @@ static AppContext* ble_context = nullptr;
 static BLESniffCB* ble_sniffer_cb_instance = nullptr;
 static SemaphoreHandle_t ble_mutex = nullptr;
 
+static void diag_ble_state(const char* where, AppContext* context) {
+    Serial.printf("[BLE] %s sniff=%d flood=%d busy=%d ready=%d scanner=%p adv=%p heap=%u\n",
+                  where,
+                  context->ble.sniff_active,
+                  context->ble.flood_active,
+                  context->ble.busy,
+                  context->ble.nimble_ready,
+                  context->ble.scanner,
+                  NimBLEDevice::getAdvertising(),
+                  ESP.getFreeHeap());
+}
+
 // Implementation of the callback class
 BLESniffCB::BLESniffCB(AppContext* context) : app_context(context) {}
 
@@ -47,6 +59,7 @@ void ble_tasks_init(AppContext* context) {
 void stop_ble(AppContext* context) {
     if (!context->ble.sniff_active && !context->ble.flood_active) return;
 
+    diag_ble_state("stop_ble:enter", context);
     context->ble.busy = true;
 
     if (context->ble.sniff_active) {
@@ -85,10 +98,12 @@ void stop_ble(AppContext* context) {
 
     lv_label_set_text(lbl_ble_status, "#00FFCC BLE READY#\n\nSelect an action.");
     context->ble.busy = false;
+    diag_ble_state("stop_ble:exit", context);
 }
 
 void start_ble_sniff(AppContext* context) {
     if (context->ble.busy) return;
+    diag_ble_state("start_ble_sniff:enter", context);
     context->ble.busy = true;
 
     if (context->ble.flood_active) stop_ble(context);
@@ -121,10 +136,12 @@ void start_ble_sniff(AppContext* context) {
     context->ble.packet_count = 0;
     context->ble.sniff_active = true;
     context->ble.busy = false;
+    diag_ble_state("start_ble_sniff:exit", context);
 }
 
 void start_ble_flood(AppContext* context) {
     if (context->ble.busy) return;
+    diag_ble_state("start_ble_flood:enter", context);
     context->ble.busy = true;
 
     if (context->ble.sniff_active) stop_ble(context);
@@ -147,6 +164,7 @@ void start_ble_flood(AppContext* context) {
 
     context->ble.flood_active = true;
     context->ble.busy = false;
+    diag_ble_state("start_ble_flood:exit", context);
 }
 
 void process_ble_sniff_ui(AppContext* context) {
@@ -186,6 +204,8 @@ void process_ble_flood(AppContext* context) {
     static uint32_t last_ble = 0;
     if (millis() - last_ble < 300) return;
 
+    uint32_t start = millis();
+
     // Guard: NimBLE must be initialized (done once in start_ble_flood)
     if (!context->ble.nimble_ready) return;
 
@@ -196,11 +216,14 @@ void process_ble_flood(AppContext* context) {
     // and getAdvertising() returns a pointer with a NULL vtable, causing PC=0x0 crash.
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     if (!adv) {
+        Serial.println("[BLE] process_ble_flood: adv=null");
         context->ble.busy = false;
         return;
     }
 
+    uint32_t t = millis();
     adv->stop();
+    Serial.printf("[BLE] adv->stop dt=%lu\n", (unsigned long)(millis() - t));
     esp_task_wdt_reset();
 
     // Randomize the 6 filler bytes in the Apple proximity payload so each
@@ -211,11 +234,17 @@ void process_ble_flood(AppContext* context) {
 
     NimBLEAdvertisementData d;
     d.setManufacturerData(std::string((char*)ap, sizeof(ap)));
+    
+    t = millis();
     adv->setAdvertisementData(d);
+    Serial.printf("[BLE] setAdvertisementData dt=%lu\n", (unsigned long)(millis() - t));
+    
     // Configure for non-connectable, non-scannable advertisements
     // adv->setConnectable(false); // Set advertisement to non-connectable
     // adv->setScannable(false);   // Set advertisement to non-scannable
+    t = millis();
     adv->start(0);              // Start advertising indefinitely (duration 0)
+    Serial.printf("[BLE] adv->start dt=%lu total=%lu\n", (unsigned long)(millis() - t), (unsigned long)(millis() - start));
 
     last_ble = millis();
     context->ble.busy = false;
