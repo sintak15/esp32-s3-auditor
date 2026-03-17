@@ -65,13 +65,20 @@ void render_scan_list(AppContext *ctx) {
     }
     deferred_render = false;
 
-    lv_obj_clean(scan_list);
+    static ScanView last_view = (ScanView)-1;
+
     char buf[128];
     if (ctx->wifi_scan.mutex && xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (last_view != ctx->wifi_scan.view) {
+            lv_obj_clean(scan_list);
+            last_view = ctx->wifi_scan.view;
+        }
+
         snprintf(buf, sizeof(buf), "APs: %d  STAs: %d", ctx->wifi_scan.ap_count, ctx->wifi_scan.sta_count);
         lv_label_set_text(lbl_scan_count, buf);
         
         if (ctx->wifi_scan.view == VIEW_AP) {
+            uint32_t child_idx = 0;
             for (int i = 0; i < ctx->wifi_scan.ap_count; i++) {
                 if (ctx->wifi_scan.ap_list[i].active) {
                     char bss[18];
@@ -81,14 +88,25 @@ void render_scan_list(AppContext *ctx) {
                             ctx->wifi_scan.ap_list[i].bssid[4], ctx->wifi_scan.ap_list[i].bssid[5]);
                     char txt[128];
                     snprintf(txt, sizeof(txt), "[%s] %s (Ch:%d, %ddBm)", enc_str(ctx->wifi_scan.ap_list[i].enc), ctx->wifi_scan.ap_list[i].ssid, ctx->wifi_scan.ap_list[i].channel, ctx->wifi_scan.ap_list[i].rssi);
-                    lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_WIFI, txt);
-                    if (btn) {
-                        lv_obj_set_user_data(btn, (void*)(intptr_t)i);
-                        lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
+                    
+                    lv_obj_t *btn = lv_obj_get_child(scan_list, child_idx);
+                    if (!btn || lv_obj_get_child_cnt(btn) < 2) {
+                        if (btn) lv_obj_del(btn);
+                        btn = lv_list_add_btn(scan_list, LV_SYMBOL_WIFI, txt);
+                        if (btn) lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
+                    } else {
+                        lv_obj_t *label = lv_obj_get_child(btn, 1);
+                        if (label) lv_label_set_text(label, txt);
                     }
+                    if (btn) lv_obj_set_user_data(btn, (void*)(intptr_t)i);
+                    child_idx++;
                 }
             }
+            while (lv_obj_get_child_cnt(scan_list) > child_idx) {
+                lv_obj_del(lv_obj_get_child(scan_list, child_idx));
+            }
         } else if (ctx->wifi_scan.view == VIEW_STA) {
+            uint32_t child_idx = 0;
              for (int i = 0; i < ctx->wifi_scan.sta_count; i++) {
                 if (ctx->wifi_scan.sta_list[i].active) {
                     char mac[18];
@@ -98,14 +116,24 @@ void render_scan_list(AppContext *ctx) {
                             ctx->wifi_scan.sta_list[i].mac[4], ctx->wifi_scan.sta_list[i].mac[5]);
                     char txt[128];
                     snprintf(txt, sizeof(txt), "%s (%ddBm)", mac, ctx->wifi_scan.sta_list[i].rssi);
-                    lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_BLUETOOTH, txt);
-                    if (btn) {
-                        lv_obj_set_user_data(btn, (void*)(intptr_t)i);
-                        // Could add STA selected event callback if implemented later
+                    
+                    lv_obj_t *btn = lv_obj_get_child(scan_list, child_idx);
+                    if (!btn || lv_obj_get_child_cnt(btn) < 2) {
+                        if (btn) lv_obj_del(btn);
+                        btn = lv_list_add_btn(scan_list, LV_SYMBOL_BLUETOOTH, txt);
+                    } else {
+                        lv_obj_t *label = lv_obj_get_child(btn, 1);
+                        if (label) lv_label_set_text(label, txt);
                     }
+                    if (btn) lv_obj_set_user_data(btn, (void*)(intptr_t)i);
+                    child_idx++;
                 }
             }
+            while (lv_obj_get_child_cnt(scan_list) > child_idx) {
+                lv_obj_del(lv_obj_get_child(scan_list, child_idx));
+            }
         } else if (ctx->wifi_scan.view == VIEW_LINKED) {
+            lv_obj_clean(scan_list); // Always clean for LINKED due to mixed obj types
             bool found_any = false;
             
             for (int i = 0; i < ctx->wifi_scan.ap_count; i++) {

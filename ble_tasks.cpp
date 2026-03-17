@@ -14,6 +14,38 @@ extern lv_obj_t *lbl_ble_status, *btn_ble_flood, *btn_ble_sniff;
 static AppContext* ble_context = nullptr;
 static BLESniffCB* ble_sniffer_cb_instance = nullptr;
 static SemaphoreHandle_t ble_mutex = nullptr;
+extern volatile bool req_stop_ble; // Allow memory bailouts to trigger UI cleanup
+
+// Worker Task Queue definitions
+enum BleCmdType {
+    BLE_CMD_NONE,
+    BLE_CMD_START_SNIFF,
+    BLE_CMD_START_FLOOD,
+    BLE_CMD_STOP
+};
+struct BleCmd {
+    BleCmdType type;
+};
+static QueueHandle_t ble_cmd_q = nullptr;
+static TaskHandle_t ble_task_handle = nullptr;
+
+// FIX 2: BLE Cooldown Tracker
+static uint32_t ble_last_switch = 0;
+static bool ble_switch_allowed(uint32_t cooldown = 500) {
+    uint32_t now = millis();
+    if (now - ble_last_switch < cooldown) return false;
+    ble_last_switch = now;
+    return true;
+}
+
+// FIX 3: Reusable Advertisement object to avoid fragmentation
+static NimBLEAdvertisementData g_adv_data;
+static bool g_adv_initialized = false;
+
+// FIX 4: Low Memory Bailout Helper
+static bool ble_low_mem() {
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 20000;
+}
 
 static void diag_ble_state(const char* where, AppContext* context) {
     Serial.printf("[BLE] %s sniff=%d flood=%d busy=%d ready=%d scanner=%p adv=%p heap=%u\n",
@@ -39,27 +71,28 @@ void BLESniffCB::onResult(const NimBLEAdvertisedDevice *dev) {
 
     if (ble_mutex && xSemaphoreTake(ble_mutex, portMAX_DELAY) == pdTRUE) {
         ble.packet_count++;
+        
+        // FIX 5: Prevent ring buffer overwrite race
+        uint8_t next = (ble.ring_head + 1) % BLE_RING_SIZE;
+        if (next == ble.ring_tail) {
+            xSemaphoreGive(ble_mutex); // buffer full, drop packet
+            return;
+        }
+        
         uint8_t slot = ble.ring_head % BLE_RING_SIZE;
         strncpy(ble.ring_buf[slot].mac, dev->getAddress().toString().c_str(), 17);
         ble.ring_buf[slot].mac[17] = 0;
         ble.ring_buf[slot].rssi = dev->getRSSI();
-        ble.ring_buf[slot].fresh = true;
-        ble.ring_head++;
+        ble.ring_head = next;
         ble.unique_macs.insert(current_mac); // Insert the MacAddress struct safely
         xSemaphoreGive(ble_mutex);
     }
 }
 
-void ble_tasks_init(AppContext* context) {
-    ble_context = context;
-    ble_sniffer_cb_instance = new BLESniffCB(context);
-    ble_mutex = xSemaphoreCreateMutex();
-}
+// --- INTERNAL HARDWARE FUNCTIONS (Runs on Core 0) ---
 
-void stop_ble(AppContext* context) {
-    if (!context->ble.sniff_active && !context->ble.flood_active) return;
-
-    diag_ble_state("stop_ble:enter", context);
+static void internal_stop_ble(AppContext* context) {
+    diag_ble_state("internal_stop_ble:enter", context);
     context->ble.busy = true;
 
     if (context->ble.sniff_active) {
@@ -67,8 +100,8 @@ void stop_ble(AppContext* context) {
         if (context->ble.scanner) {
             context->ble.scanner->setScanCallbacks(nullptr);
             context->ble.scanner->stop();
+            context->ble.scanner->clearResults(); // FIX 1: Clear results on stop
         }
-        if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
     }
 
     if (context->ble.flood_active) {
@@ -76,45 +109,17 @@ void stop_ble(AppContext* context) {
         // Stop advertising safely before deinit
         NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
         if (adv) adv->stop();
-        if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
     }
 
-        // Avoid calling NimBLEDevice::deinit(true) here!
-        // It contains internal blocking loops that, combined with the delays above, stall the UI task
-        // for 350ms+, starving lv_timer_handler and crashing the physics engine during navigation.
-        /*
-    if (context->ble.nimble_ready) {
-        NimBLEDevice::deinit(true);
-        context->ble.nimble_ready = false;
-        context->ble.scanner = nullptr; // Ensure scanner is nulled after deinit
-    } else {
-        // If nimble_ready was false but sniff/flood active, it means something went wrong.
-        // Log an error or handle it. For now, just ensure UI is reset.
-        if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
-        if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
-        lv_label_set_text(lbl_ble_status, "#FF4444 BLE ERROR — NimBLE state inconsistent#");
-    }
-        */
-
-    lv_label_set_text(lbl_ble_status, "#00FFCC BLE READY#\n\nSelect an action.");
     context->ble.busy = false;
-    diag_ble_state("stop_ble:exit", context);
+    diag_ble_state("internal_stop_ble:exit", context);
 }
 
-void start_ble_sniff(AppContext* context) {
-    if (context->ble.busy) return;
-    
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
-        Serial.println("[BLE] start denied: low internal heap");
-        if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
-        lv_label_set_text(lbl_ble_status, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
-        return;
-    }
-    
-    diag_ble_state("start_ble_sniff:enter", context);
+static void internal_start_ble_sniff(AppContext* context) {
+    diag_ble_state("internal_start_ble_sniff:enter", context);
     context->ble.busy = true;
 
-    if (context->ble.flood_active) stop_ble(context);
+    if (context->ble.flood_active) internal_stop_ble(context);
 
     context->wifi_scan.paused = true;
     esp_wifi_set_promiscuous(false);
@@ -123,7 +128,7 @@ void start_ble_sniff(AppContext* context) {
     if (esp_wifi_get_mode(&mode) == ESP_OK) {
         WiFi.disconnect(true);
     }
-    delay(50);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     if (!context->ble.nimble_ready) {
         NimBLEDevice::init("");
@@ -132,8 +137,8 @@ void start_ble_sniff(AppContext* context) {
     context->ble.scanner = NimBLEDevice::getScan();
     context->ble.scanner->setScanCallbacks(ble_sniffer_cb_instance, true);
     context->ble.scanner->setActiveScan(true);
-    context->ble.scanner->setInterval(100);
-    context->ble.scanner->setWindow(99);
+    context->ble.scanner->setInterval(160); // FIX 6: Reduce scan pressure
+    context->ble.scanner->setWindow(80);
     context->ble.scanner->start(0, false, true);
 
     if (ble_mutex && xSemaphoreTake(ble_mutex, portMAX_DELAY) == pdTRUE) {
@@ -143,23 +148,20 @@ void start_ble_sniff(AppContext* context) {
     context->ble.packet_count = 0;
     context->ble.sniff_active = true;
     context->ble.busy = false;
-    diag_ble_state("start_ble_sniff:exit", context);
+
+    // FIX 7: Add heap debug
+    Serial.printf("[BLE] heap=%u min=%u\n",
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+
+    diag_ble_state("internal_start_ble_sniff:exit", context);
 }
 
-void start_ble_flood(AppContext* context) {
-    if (context->ble.busy) return;
-    
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
-        Serial.println("[BLE] start denied: low internal heap");
-        if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
-        lv_label_set_text(lbl_ble_status, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
-        return;
-    }
-
-    diag_ble_state("start_ble_flood:enter", context);
+static void internal_start_ble_flood(AppContext* context) {
+    diag_ble_state("internal_start_ble_flood:enter", context);
     context->ble.busy = true;
 
-    if (context->ble.sniff_active) stop_ble(context);
+    if (context->ble.sniff_active) internal_stop_ble(context);
 
     context->wifi_scan.paused = true;
     esp_wifi_set_promiscuous(false);
@@ -178,22 +180,167 @@ void start_ble_flood(AppContext* context) {
 
     context->ble.flood_active = true;
     context->ble.busy = false;
-    diag_ble_state("start_ble_flood:exit", context);
+    
+    // FIX 7: Add heap debug
+    Serial.printf("[BLE] heap=%u min=%u\n",
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+
+    diag_ble_state("internal_start_ble_flood:exit", context);
+}
+
+static void internal_process_ble_flood(AppContext* context) {
+    if (!context->ble.flood_active || context->ble.busy) return;
+    
+    if (ble_low_mem()) {
+        Serial.println("[BLE] stopping flood: low memory");
+        req_stop_ble = true; // Signal main loop to push UI teardown safely
+        return;
+    }
+
+    static uint32_t last_ble = 0;
+    if (millis() - last_ble < 300) return;
+
+    if (!context->ble.nimble_ready) return;
+
+    context->ble.busy = true;
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    if (!adv) {
+        context->ble.busy = false;
+        return;
+    }
+
+    adv->stop();
+
+    uint8_t ap[] = {0x4C,0x00,0x07,0x19,0x01,0x0A,0x20,0x55,0x14,0x58,0x6E,0x42,
+                    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+    esp_fill_random(&ap[12], 6); 
+
+    if (!g_adv_initialized) {
+        g_adv_data = NimBLEAdvertisementData();
+        g_adv_initialized = true;
+    }
+    g_adv_data.setManufacturerData(std::string((char*)ap, sizeof(ap)));
+    adv->setAdvertisementData(g_adv_data);
+    adv->start(0);              
+
+    static uint32_t last_debug = 0;
+    if (millis() - last_debug > 5000) {
+        Serial.printf("[BLE] heap=%u min=%u\n",
+            heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+            heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+        last_debug = millis();
+    }
+
+    last_ble = millis();
+    context->ble.busy = false;
+}
+
+static void ble_worker_task(void* arg) {
+    AppContext* context = (AppContext*)arg;
+    BleCmd cmd;
+
+    for (;;) {
+        // Rapid response command polling
+        if (xQueueReceive(ble_cmd_q, &cmd, pdMS_TO_TICKS(10)) == pdTRUE) {
+            switch (cmd.type) {
+                case BLE_CMD_START_SNIFF: internal_start_ble_sniff(context); break;
+                case BLE_CMD_START_FLOOD: internal_start_ble_flood(context); break;
+                case BLE_CMD_STOP:        internal_stop_ble(context); break;
+                default: break;
+            }
+        }
+
+        // Background periodic flooding runs completely independent of UI
+        if (context->ble.flood_active && !context->ble.busy) {
+            internal_process_ble_flood(context);
+        }
+    }
+}
+
+// --- EXTERNAL API WRAPPERS (Safe for main_app_task & LVGL rendering) ---
+
+void ble_tasks_init(AppContext* context) {
+    ble_context = context;
+    ble_sniffer_cb_instance = new BLESniffCB(context);
+    ble_mutex = xSemaphoreCreateMutex();
+    
+    ble_cmd_q = xQueueCreate(10, sizeof(BleCmd));
+    // Spin up BLE worker off the main rendering core 1, placing it entirely on core 0
+    xTaskCreatePinnedToCore(ble_worker_task, "ble_task", 6144, context, 1, &ble_task_handle, 0); 
+}
+
+void stop_ble(AppContext* context) {
+    if (!context->ble.sniff_active && !context->ble.flood_active) return;
+    
+    BleCmd cmd = {BLE_CMD_STOP};
+    xQueueSend(ble_cmd_q, &cmd, 0);
+
+    // Safely execute UI text adjustments without waiting on radio shutdown
+    if (context->ble.sniff_active && btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
+    if (context->ble.flood_active && btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
+    lv_label_set_text(lbl_ble_status, "#00FFCC BLE READY#\n\nSelect an action.");
+}
+
+void start_ble_sniff(AppContext* context) {
+    if (!ble_switch_allowed()) {
+        Serial.println("[BLE] switch blocked (cooldown)");
+        return;
+    }
+
+    if (context->ble.busy) return;
+    
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
+        Serial.println("[BLE] start denied: low internal heap");
+        if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
+        lv_label_set_text(lbl_ble_status, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
+        return;
+    }
+
+    BleCmd cmd = {BLE_CMD_START_SNIFF};
+    xQueueSend(ble_cmd_q, &cmd, 0);
+}
+
+void start_ble_flood(AppContext* context) {
+    if (!ble_switch_allowed()) {
+        Serial.println("[BLE] switch blocked (cooldown)");
+        return;
+    }
+
+    if (context->ble.busy) return;
+    
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
+        Serial.println("[BLE] start denied: low internal heap");
+        if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
+        lv_label_set_text(lbl_ble_status, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
+        return;
+    }
+
+    BleCmd cmd = {BLE_CMD_START_FLOOD};
+    xQueueSend(ble_cmd_q, &cmd, 0);
 }
 
 void process_ble_sniff_ui(AppContext* context) {
     if (!context->ble.sniff_active) return;
+    
+    if (ble_low_mem()) {
+        Serial.println("[BLE] stopping sniff: low memory");
+        stop_ble(context);
+        return;
+    }
+
     BleState& ble = context->ble;
     uint32_t unique_size = 0;
     uint32_t pkt_count = 0;
     String last_mac_str = "";
 
     if (ble_mutex && xSemaphoreTake(ble_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        for (int i = 0; i < BLE_RING_SIZE; i++) {
-            if (!ble.ring_buf[i].fresh) continue;
-            ble.ring_buf[i].fresh = false;
+        // FIX 5: Proper ring buffer consumer
+        while (ble.ring_tail != ble.ring_head) {
+            uint8_t i = ble.ring_tail;
             ble.last_mac = ble.ring_buf[i].mac; 
             if (sd_card_ready()) sd_log_ble_sniff(millis(), ble.ring_buf[i].mac, ble.ring_buf[i].rssi);
+            ble.ring_tail = (ble.ring_tail + 1) % BLE_RING_SIZE;
         }
         unique_size = ble.unique_macs.size();
         pkt_count = ble.packet_count;
@@ -211,54 +358,4 @@ void process_ble_sniff_ui(AppContext* context) {
         ui_queue.commit_write();
     }
     last_ui = millis();
-}
-
-void process_ble_flood(AppContext* context) {
-    if (!context->ble.flood_active || context->ble.busy) return;
-    static uint32_t last_ble = 0;
-    if (millis() - last_ble < 300) return;
-
-    uint32_t start = millis();
-
-    // Guard: NimBLE must be initialized (done once in start_ble_flood)
-    if (!context->ble.nimble_ready) return;
-
-    context->ble.busy = true;
-
-    // Reuse the existing NimBLE instance — just stop, update payload, restart.
-    // Do NOT deinit/reinit every cycle: after deinit the host task is destroyed
-    // and getAdvertising() returns a pointer with a NULL vtable, causing PC=0x0 crash.
-    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-    if (!adv) {
-        Serial.println("[BLE] process_ble_flood: adv=null");
-        context->ble.busy = false;
-        return;
-    }
-
-    uint32_t t = millis();
-    adv->stop();
-    Serial.printf("[BLE] adv->stop dt=%lu\n", (unsigned long)(millis() - t));
-
-    // Randomize the 6 filler bytes in the Apple proximity payload so each
-    // beacon looks like a different device
-    uint8_t ap[] = {0x4C,0x00,0x07,0x19,0x01,0x0A,0x20,0x55,0x14,0x58,0x6E,0x42,
-                    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
-    esp_fill_random(&ap[12], 6); // randomize trailing bytes
-
-    NimBLEAdvertisementData d;
-    d.setManufacturerData(std::string((char*)ap, sizeof(ap)));
-    
-    t = millis();
-    adv->setAdvertisementData(d);
-    Serial.printf("[BLE] setAdvertisementData dt=%lu\n", (unsigned long)(millis() - t));
-    
-    // Configure for non-connectable, non-scannable advertisements
-    // adv->setConnectable(false); // Set advertisement to non-connectable
-    // adv->setScannable(false);   // Set advertisement to non-scannable
-    t = millis();
-    adv->start(0);              // Start advertising indefinitely (duration 0)
-    Serial.printf("[BLE] adv->start dt=%lu total=%lu\n", (unsigned long)(millis() - t), (unsigned long)(millis() - start));
-
-    last_ble = millis();
-    context->ble.busy = false;
 }

@@ -142,6 +142,7 @@ struct BleState {
   String last_mac;
   BLERing ring_buf[BLE_RING_SIZE];
   uint8_t ring_head;
+  uint8_t ring_tail;
 };
 
 // Define StatusState

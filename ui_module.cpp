@@ -383,12 +383,11 @@ void ui_build() {
   lv_label_set_text(lbl_pr,"Probe Requests:");
   lv_obj_set_style_text_color(lbl_pr,lv_color_hex(0xFF00FF),0);
   lv_obj_align(lbl_pr,LV_ALIGN_TOP_LEFT,5,5);
-  probe_list=lv_list_create(tab_probes);
+  probe_list=lv_textarea_create(tab_probes);
   lv_obj_set_size(probe_list,SCREEN_W-10,195);
   lv_obj_align(probe_list,LV_ALIGN_TOP_MID,0,24);
-  lv_obj_set_style_bg_color(probe_list,lv_color_hex(0x080808),0);
-  lv_obj_set_style_border_width(probe_list,0,0);
-  lv_obj_set_style_pad_all(probe_list,2,0);
+  lv_textarea_set_text(probe_list, "Waiting for probes...\n");
+  lv_obj_clear_flag(probe_list, LV_OBJ_FLAG_CLICK_FOCUSABLE);
   btn_probe_start=lv_btn_create(tab_probes); lv_obj_set_size(btn_probe_start,SCREEN_W-20,38);
   lv_obj_align(btn_probe_start,LV_ALIGN_BOTTOM_MID,0,-44);
   lv_obj_add_style(btn_probe_start,&style_btn_dark,0);
@@ -501,11 +500,11 @@ void ui_build() {
   lv_label_set_recolor(lbl_nodedb_title, true);
   lv_obj_align(lbl_nodedb_title, LV_ALIGN_TOP_MID, 0, 0);
 
-  nodedb_list = lv_list_create(lora_nodedb_panel);
+  nodedb_list = lv_textarea_create(lora_nodedb_panel);
   lv_obj_set_size(nodedb_list, SCREEN_W - 20, SCREEN_H - 100);
   lv_obj_align(nodedb_list, LV_ALIGN_TOP_MID, 0, 30);
-  lv_obj_set_style_bg_color(nodedb_list, lv_color_hex(0x080808), 0);
-  lv_obj_set_style_border_width(nodedb_list, 0, 0);
+  lv_textarea_set_text(nodedb_list, "Waiting for nodes...\n");
+  lv_obj_clear_flag(nodedb_list, LV_OBJ_FLAG_CLICK_FOCUSABLE);
   
   lv_obj_t *btn_close_nodedb = lv_btn_create(lora_nodedb_panel);
   lv_obj_set_size(btn_close_nodedb, SCREEN_W - 30, 36);
