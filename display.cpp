@@ -80,6 +80,7 @@ void display_init() {
     delay(50);
 
     Wire.begin(I2C_SDA, I2C_SCL, 100000);
+    Wire.setTimeOut(20); // Prevent hardware I2C bus noise from permanently hanging the UI core
 
     tft.begin();
     tft.setRotation(0);
@@ -168,11 +169,15 @@ void ui_update_tick(lv_timer_t *timer) {
     // Update LoRa log in terminal
     if (ta_lora_log && lora_log_panel && !lv_obj_has_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN)) {
         if (ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-            if (ui_context->lora.log_updated) {
-                if (strlen(ui_context->lora.log_data) > 1500) { strcpy(ui_context->lora.log_data, "--- Buffer Cleared ---\n"); }
-                lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data);
-                lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF); // Jump to bottom instantly
-                ui_context->lora.log_updated = false;
+            static uint32_t last_log_draw = 0;
+            // Throttle heavy text area recalculations to max 4 times per second to prevent UI freeze
+            if (ui_context->lora.log_updated && millis() - last_log_draw > 250) {
+                ui_context->lora.log_data[sizeof(ui_context->lora.log_data) - 1] = '\0';
+                if (strlen(ui_context->lora.log_data) > 1900) { strcpy(ui_context->lora.log_data, "--- Buffer Cleared ---\n"); }
+                lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data); // Redraw
+                lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF);   // Jump to bottom
+                ui_context->lora.log_updated = false;                         // Mark as rendered
+                last_log_draw = millis();
             }
             xSemaphoreGive(ui_context->lora.mutex);
         }
@@ -181,11 +186,15 @@ void ui_update_tick(lv_timer_t *timer) {
     // Update LoRa Chat Panel
     if (ta_lora_chat && lora_chat_panel && !lv_obj_has_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN)) {
         if (ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-            if (ui_context->lora.chat_updated) {
-                if (strlen(ui_context->lora.chat_data) > 1500) { strcpy(ui_context->lora.chat_data, "--- Buffer Cleared ---\n"); }
-                lv_textarea_set_text(ta_lora_chat, ui_context->lora.chat_data);
-                lv_obj_scroll_to_y(ta_lora_chat, LV_COORD_MAX, LV_ANIM_OFF); // Jump to bottom instantly
-                ui_context->lora.chat_updated = false;
+            static uint32_t last_chat_draw = 0;
+            // Throttle heavy text area recalculations to max 4 times per second to prevent UI freeze
+            if (ui_context->lora.chat_updated && millis() - last_chat_draw > 250) {
+                ui_context->lora.chat_data[sizeof(ui_context->lora.chat_data) - 1] = '\0';
+                if (strlen(ui_context->lora.chat_data) > 1900) { strcpy(ui_context->lora.chat_data, "--- Buffer Cleared ---\n"); }
+                lv_textarea_set_text(ta_lora_chat, ui_context->lora.chat_data); // Redraw
+                lv_obj_scroll_to_y(ta_lora_chat, LV_COORD_MAX, LV_ANIM_OFF);    // Jump to bottom
+                ui_context->lora.chat_updated = false;                          // Mark as rendered
+                last_chat_draw = millis();
             }
             xSemaphoreGive(ui_context->lora.mutex);
         }
@@ -231,8 +240,11 @@ void ui_update_tick(lv_timer_t *timer) {
                 for (const auto& n : ui_context->lora.known_nodes) {
                     char buf[128];
                     uint32_t age = (millis() - n.last_heard) / 1000;
+                    char safe_long_name[sizeof(n.long_name) + 1];
+                    strncpy(safe_long_name, n.long_name, sizeof(n.long_name));
+                    safe_long_name[sizeof(n.long_name)] = '\0';
                     snprintf(buf, sizeof(buf), "%s\n!%08lx  %lus ago  SNR: %d", 
-                        strlen(n.long_name) > 0 ? n.long_name : "Unknown",
+                        safe_long_name[0] != '\0' ? safe_long_name : "Unknown",
                         (unsigned long)n.num, (unsigned long)age, n.snr);
                     lv_list_add_text(nodedb_list, buf);
                 }
