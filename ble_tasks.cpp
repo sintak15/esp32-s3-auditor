@@ -276,10 +276,9 @@ void stop_ble(AppContext* context) {
     BleCmd cmd = {BLE_CMD_STOP};
     xQueueSend(ble_cmd_q, &cmd, 0);
 
-    // Safely execute UI text adjustments without waiting on radio shutdown
-    if (context->ble.sniff_active && btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
-    if (context->ble.flood_active && btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
-    lv_label_set_text(lbl_ble_status, "#00FFCC BLE READY#\n\nSelect an action.");
+    queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "START BLE SNIFF");
+    queue_local_ui_text(UI_EVT_SET_BLE_FLOOD_BUTTON, "START BLE FLOOD");
+    queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#00FFCC BLE READY#\n\nSelect an action.");
 }
 
 void start_ble_sniff(AppContext* context) {
@@ -292,8 +291,8 @@ void start_ble_sniff(AppContext* context) {
     
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
         Serial.println("[BLE] start denied: low internal heap");
-        if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
-        lv_label_set_text(lbl_ble_status, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
+        queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "START BLE SNIFF");
+        queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
         return;
     }
 
@@ -311,8 +310,8 @@ void start_ble_flood(AppContext* context) {
     
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
         Serial.println("[BLE] start denied: low internal heap");
-        if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
-        lv_label_set_text(lbl_ble_status, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
+        queue_local_ui_text(UI_EVT_SET_BLE_FLOOD_BUTTON, "START BLE FLOOD");
+        queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
         return;
     }
 
@@ -350,12 +349,9 @@ void process_ble_sniff_ui(AppContext* context) {
     
     static uint32_t last_ui = 0;
     if (millis() - last_ui < 1000) return;
-    UiEvent* e = ui_queue.get_write_slot();
-    if (e) {
-        e->type = UiEvent::SET_BLE_STATUS;
-        snprintf(e->text, sizeof(e->text), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
-                 pkt_count, unique_size, last_mac_str.c_str());
-        ui_queue.commit_write();
-    }
+    char buf[128];
+    snprintf(buf, sizeof(buf), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
+             pkt_count, unique_size, last_mac_str.c_str());
+    queue_local_ui_text(UI_EVT_SET_BLE_STATUS, buf);
     last_ui = millis();
 }

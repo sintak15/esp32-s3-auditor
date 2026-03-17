@@ -17,6 +17,9 @@ extern lv_obj_t *ta_lora_chat;
 extern lv_obj_t *lora_log_panel;
 extern lv_obj_t *ui_spinner;
 
+extern void trace_enter(const char *s);
+extern void trace_exit(const char *s);
+
 // Global objects for this module
 TFT_eSPI tft = TFT_eSPI();
 static lv_disp_draw_buf_t draw_buf;
@@ -196,6 +199,8 @@ void ui_update_tick(lv_timer_t *timer) {
     // CRITICAL: Prevent crash if timer fires during teardown or before init
     if (!timer || !ui_context) return;
 
+    trace_enter("ui_update_tick");
+
     uint32_t t0 = millis();
     uint32_t t_stage;
     
@@ -203,6 +208,7 @@ void ui_update_tick(lv_timer_t *timer) {
     if (!lbl_batt || !lbl_batt_pct || !lbl_sd || !lbl_wifi || !lbl_msg || !tabview ||
         !ta_lora_log || !lora_log_panel || !ta_lora_chat || !lora_chat_panel ||
         !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel) {
+        trace_exit("ui_update_tick");
         Serial.println("[UI] Skipping update - objects not ready");
         return;
     }
@@ -440,4 +446,5 @@ void ui_update_tick(lv_timer_t *timer) {
     if (dt > 10) {
         Serial.printf("[UI] ui_update_tick %lu ms\n", (unsigned long)dt);
     }
+    trace_exit("ui_update_tick");
 }

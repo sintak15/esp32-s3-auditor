@@ -12,6 +12,9 @@ extern lv_obj_t *lbl_scan_count;
 extern lv_obj_t *tabview;
 extern void cb_net_selected(lv_event_t* e);
 
+extern void trace_enter(const char *s);
+extern void trace_exit(const char *s);
+
 static bool deferred_render = false;
 
 void wifi_scanner_init(AppContext *ctx) {
@@ -190,8 +193,9 @@ void mac_str(const uint8_t *mac, char *out) {
 }
 
 void scan_tick(lv_timer_t *timer) {
+    trace_enter("scan_tick");
     AppContext *ctx = (AppContext *)timer->user_data;
-    if (!ctx || ctx->wifi_scan.paused) return;
+    if (!ctx || ctx->wifi_scan.paused) { trace_exit("scan_tick"); return; }
 
     if (deferred_render) {
         lv_indev_t * indev = lv_indev_get_next(NULL);
@@ -205,6 +209,7 @@ void scan_tick(lv_timer_t *timer) {
     int16_t n = WiFi.scanComplete();
 
     if (n == WIFI_SCAN_RUNNING) {
+        trace_exit("scan_tick");
         return; // Wait for the current scan to finish to prevent driver panic
     }
 
@@ -242,4 +247,5 @@ void scan_tick(lv_timer_t *timer) {
         run_ap_scan(ctx);
         ctx->wifi_scan.last_scan_ms = millis();
     }
+    trace_exit("scan_tick");
 }

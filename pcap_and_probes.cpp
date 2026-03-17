@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_heap_caps.h>
+#include <esp_task_wdt.h>
 #include "ui_events.h"
 
 // Global AppContext instance (defined in main .ino file)
@@ -67,7 +68,7 @@ void process_pcap_queue(AppContext* context) {
     if (!context->sniffer.pcap_queue) return;
     pcap_record_t rec;
     int writes = 0;
-    uint32_t start = millis();
+    uint32_t start_ms = millis();
 
     while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0) == pdTRUE) { // Pass address
         if (!context->sniffer.pcap_active || !context->sniffer.pcap_file) {
@@ -89,17 +90,14 @@ void process_pcap_queue(AppContext* context) {
             continue; // Continue loop to fast-drain remaining items out of memory
         }
         context->sniffer.pcap_packet_count++;
+        writes++;
         
-        // Yield briefly every 4 writes so the watchdog doesn't starve if the SD card lags
-        if ((++writes & 3) == 0) vTaskDelay(1); 
-        if (writes >= 8) break; // Ultra-strict cap to guarantee no lv_timer_handler starvation
-    }
-    
-    if (writes > 0) {
-        Serial.printf("[DIAG] pcap drained=%d remain=%u dt=%lu\n",
-                      writes,
-                      context->sniffer.pcap_queue ? uxQueueMessagesWaiting(context->sniffer.pcap_queue) : 0,
-                      (unsigned long)(millis() - start));
+        if ((writes & 0x07) == 0) {
+            esp_task_wdt_reset();
+        }
+
+        if (writes >= 16) break;
+        if (millis() - start_ms >= 10) break;
     }
 }
 
@@ -107,69 +105,23 @@ void process_probe_queue(AppContext* context) {
     if (!context->sniffer.probe_active) return;
     ProbeSsid received_probe_ssid; // Receive into a struct
     int processed = 0;
-    int ui_added = 0; // Cap UI churn
-    uint32_t start = millis();
     
     while (xQueueReceive(context->sniffer.probe_queue, &received_probe_ssid, 0) == pdTRUE) { // Pass address
-        processed++;
         if (strlen(received_probe_ssid.data) > 0 && context->sniffer.unique_probes.find(received_probe_ssid) == context->sniffer.unique_probes.end()) {
             if (context->sniffer.unique_probes.size() > MAX_LIST_MEMORY) {
-                lv_indev_t * indev = lv_indev_get_next(NULL);
-                bool is_scrolling = probe_list ? lv_obj_is_scrolling(probe_list) : false;
-                if ((indev && indev->proc.state == LV_INDEV_STATE_PR) || is_scrolling) {
-                    // Defer clearing the list to prevent LVGL crash while user is touching the screen
-                    xQueueSendToFront(context->sniffer.probe_queue, &received_probe_ssid, 0);
-                    break;
-                }
                 context->sniffer.unique_probes.clear();
-                // ISOLATION TEST B: Comment out probe UI churn
-                /*
-                UiEvent* e = ui_queue.get_write_slot();
-                if (e) {
-                    e->type = UiEvent::CLEAR_PROBES;
-                    ui_queue.commit_write();
-                }
-                */
-                ui_added = 0;
+                queue_local_ui_text(UI_EVT_CLEAR_PROBE_LIST, nullptr);
             }
-            context->sniffer.unique_probes.insert(received_probe_ssid);
             
-            if (probe_list && tabview && lv_tabview_get_tab_act(tabview) == 5) {
-                if (ui_added < 4) {
-                    lv_indev_t * indev = lv_indev_get_next(NULL);
-                    bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(probe_list);
-                    if (!is_touched) {
-                        // ISOLATION TEST B: Comment out probe UI churn
-                        /*
-                        UiEvent* e = ui_queue.get_write_slot();
-                        if (e) {
-                            e->type = UiEvent::ADD_PROBE;
-                            strncpy(e->text, received_probe_ssid.data, sizeof(e->text) - 1);
-                            e->text[sizeof(e->text) - 1] = '\0';
-                            ui_queue.commit_write();
-                        }
-                        */
-                        ui_added++;
-                    }
-                }
-            }
+            context->sniffer.unique_probes.insert(received_probe_ssid);
+            queue_local_ui_text(UI_EVT_ADD_PROBE_TEXT, received_probe_ssid.data);
 
             if (sd_card_ready()) {
                 sd_log_probe(received_probe_ssid.data);
             }
         }
         
-        // Yield briefly every 4 writes so the watchdog doesn't starve
-        if ((++processed & 3) == 0) vTaskDelay(1);
-        if (processed >= 8) break; // Ultra-strict cap to guarantee no lv_timer_handler starvation
-    }
-    
-    if (processed > 0) {
-        Serial.printf("[DIAG] probe drained=%d added=%d remain=%u unique=%u dt=%lu\n",
-                      processed, ui_added,
-                      context->sniffer.probe_queue ? uxQueueMessagesWaiting(context->sniffer.probe_queue) : 0,
-                      (unsigned)context->sniffer.unique_probes.size(),
-                      (unsigned long)(millis() - start));
+        if (++processed >= 16) break;
     }
 }
 
@@ -188,17 +140,13 @@ void process_channel_hop(AppContext* context) {
     context->sniffer.last_hop_ms = millis();
     
     static uint32_t last_ui = 0;
-    // ISOLATION TEST C: Throttle to 500ms
     if (context->sniffer.pcap_active && millis() - last_ui >= 500) {
-        UiEvent* e = ui_queue.get_write_slot();
-        if (e) {
-            e->type = UiEvent::SET_PCAP_STATUS;
-            snprintf(e->text, sizeof(e->text), "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu",
-                     context->sniffer.pcap_ch_locked ? "#FF8800 LOCKED# " : "",
-                     context->sniffer.channel,
-                     context->sniffer.pcap_packet_count);
-            ui_queue.commit_write();
-        }
+        char buf[96];
+        snprintf(buf, sizeof(buf), "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu",
+                 context->sniffer.pcap_ch_locked ? "#FF8800 LOCKED# " : "",
+                 context->sniffer.channel,
+                 context->sniffer.pcap_packet_count);
+        queue_local_ui_text(UI_EVT_SET_PCAP_STATUS, buf);
         last_ui = millis();
     }
 }
@@ -245,8 +193,8 @@ void stop_pcap(AppContext* context) {
     }
     sd_logger_pcap_file_close(context); // Corrected function call
     context->sniffer.pcap_file = File(); // explicitly invalidate
-    if (btn_pcap_start) lv_label_set_text(lv_obj_get_child(btn_pcap_start, 0), "START PCAP");
-    lv_label_set_text(lbl_pcap_status, "#00FF88 Capture saved to SD#");
+    queue_local_ui_text(UI_EVT_SET_PCAP_BUTTON, "START PCAP");
+    queue_local_ui_text(UI_EVT_SET_PCAP_STATUS, "#00FF88 Capture saved to SD#");
 }
 
 void start_probe_sniffer(AppContext* context) {
@@ -259,7 +207,7 @@ void start_probe_sniffer(AppContext* context) {
         esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
     }
     context->sniffer.unique_probes.clear();
-    if (probe_list) lv_obj_clean(probe_list);
+    queue_local_ui_text(UI_EVT_CLEAR_PROBE_LIST, nullptr);
     // UI button text update handled in cb_toggle_probes in .ino
 }
 
@@ -270,5 +218,5 @@ void stop_probe_sniffer(AppContext* context) {
         esp_wifi_set_promiscuous(false);
         // DO NOT unregister the callback! Gated booleans are safer against Core 0 panics.
     }
-    if (btn_probe_start) lv_label_set_text(lv_obj_get_child(btn_probe_start, 0), "START PROBE SNIFF");
+    queue_local_ui_text(UI_EVT_SET_PROBE_BUTTON, "START PROBE SNIFF");
 }

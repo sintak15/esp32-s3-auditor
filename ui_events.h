@@ -10,13 +10,18 @@ enum LocalUiEventType {
     UI_EVT_SET_BLE_SNIFF_BUTTON,
     UI_EVT_SET_PROBE_BUTTON,
     UI_EVT_SET_SCAN_PAUSE,
+    UI_EVT_SET_PCAP_STATUS,
+    UI_EVT_SET_BLE_STATUS,
+    UI_EVT_ADD_PROBE_TEXT,
+    UI_EVT_CLEAR_PROBE_LIST,
     UI_EVT_NAVIGATE
 };
 
 struct LocalUiEvent {
     LocalUiEventType type;
-    char text[96];
-    int tab_id;
+    char text[128];
+    uint16_t tab_id;
+    uint32_t value_u32;
 };
 
 struct UiEvent {
@@ -56,5 +61,8 @@ public:
 };
 
 extern UiEventQueue ui_queue;
+
+// Helper to safely queue UI text updates from any Core 0 task
+extern void queue_local_ui_text(LocalUiEventType type, const char *text);
 
 #endif

@@ -233,8 +233,13 @@ bool sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // 
     h.ts_usec = record->ts_usec;
     h.incl_len = record->len;
     h.orig_len = record->len;
+    
+    uint32_t t = millis();
     size_t w1 = context->sniffer.pcap_file.write((uint8_t*)&h, sizeof(h));
     size_t w2 = context->sniffer.pcap_file.write(record->payload, record->len);
+    uint32_t dt = millis() - t;
+    
+    if (dt > 20) Serial.printf("[DIAG] slow: sd_logger_pcap_file_write %lu ms\n", (unsigned long)dt);
     
     if (w1 != sizeof(h) || w2 != record->len) {
         Serial.println("[PCAP] WRITE FAILED");
