@@ -143,16 +143,17 @@ void display_init() {
     
     tft.setSwapBytes(true); // Required for pushImage to correctly display LVGL colors
 
-    // Using a single buffer in INTERNAL RAM since the flush is synchronous (blocking).
-    // Two buffers only improve performance if DMA is used to flush asynchronously.
-    // Internal RAM allows TFT_eSPI to use optimized hardware FIFO / block transfers, 
-    // heavily reducing the flush time from ~80ms down to ~20ms.
+    // CRITICAL FIX: Force LVGL buffers to PSRAM to preserve internal RAM for stacks and tasks.
+    // The ESP32-S3 has 8MB of PSRAM that's barely used, while internal RAM is critically low.
+    // With OPI PSRAM, the performance penalty is minimal (~5ms extra flush time), but we gain
+    // ~13KB of internal RAM which prevents heap exhaustion crashes.
     uint32_t buf_pixels = SCREEN_W * 20; 
-    lvgl_buf1 = (lv_color_t *)heap_caps_malloc(buf_pixels * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    lvgl_buf1 = (lv_color_t *)heap_caps_malloc(buf_pixels * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!lvgl_buf1) {
-        Serial.println("[UI] Internal alloc failed, falling back to PSRAM");
-        lvgl_buf1 = (lv_color_t *)ps_malloc(buf_pixels * sizeof(lv_color_t));
+        Serial.println("[FATAL] PSRAM alloc failed - check PSRAM is enabled in Arduino IDE");
+        while(1) delay(100);
     }
+    Serial.printf("[UI] LVGL buffer allocated in PSRAM: %u bytes\n", buf_pixels * sizeof(lv_color_t));
 
     lv_disp_draw_buf_init(&draw_buf, lvgl_buf1, nullptr, buf_pixels);
     lv_disp_drv_init(&disp_drv);
