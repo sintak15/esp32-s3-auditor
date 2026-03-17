@@ -14,6 +14,7 @@ extern lv_obj_t *nodedb_list;
 extern lv_obj_t *lora_chat_panel;
 extern lv_obj_t *ta_lora_chat;
 extern lv_obj_t *lora_log_panel;
+extern lv_obj_t *ui_spinner;
 
 // Global objects for this module
 TFT_eSPI tft = TFT_eSPI();
@@ -247,5 +248,24 @@ void ui_update_tick(lv_timer_t *timer) {
         lv_obj_set_style_text_color(lbl_msg, lv_color_hex(msg_blink ? 0x00FF88 : 0x444444), 0);
     } else {
         lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0x444444), 0);
+    }
+
+    // Activity Spinner
+    if (ui_spinner) {
+        bool is_active = (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active || 
+                          ui_context->ble.sniff_active || ui_context->ble.flood_active || 
+                          ui_context->pentest.current_mode != PT_NONE);
+        if (is_active && lv_obj_has_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_clear_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN);
+        } else if (!is_active && !lv_obj_has_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // Screen Dimming Timeout (60 seconds)
+    if (lv_disp_get_inactive_time(NULL) > 60000) {
+        digitalWrite(TFT_BL, LOW);
+    } else {
+        digitalWrite(TFT_BL, HIGH);
     }
 }

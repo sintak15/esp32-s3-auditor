@@ -8,6 +8,7 @@
 extern AppContext g_app_context;
 
 extern lv_obj_t *lbl_pcap_status, *probe_list, *btn_pcap_start, *btn_probe_start;
+extern lv_obj_t *tabview;
 
 static AppContext* sniffer_context = nullptr; // Declaration for sniffer_context
 
@@ -91,20 +92,22 @@ void process_probe_queue(AppContext* context) {
             context->sniffer.unique_probes.insert(received_probe_ssid);
             
             // Limit LVGL object creation per loop iteration
-            if (probe_list && ui_added < 4) {
-                lv_indev_t * indev = lv_indev_get_next(NULL);
-                bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(probe_list);
-                
-                uint32_t child_cnt = lv_obj_get_child_cnt(probe_list);
-                if (child_cnt >= 60) {
-                    if (!is_touched) {
-                        lv_obj_del(lv_obj_get_child(probe_list, 0)); // Delete the oldest item
+            if (probe_list && tabview && lv_tabview_get_tab_act(tabview) == 5) {
+                if (ui_added < 4) {
+                    lv_indev_t * indev = lv_indev_get_next(NULL);
+                    bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(probe_list);
+                    
+                    uint32_t child_cnt = lv_obj_get_child_cnt(probe_list);
+                    if (child_cnt >= 60) {
+                        if (!is_touched) {
+                            lv_obj_del(lv_obj_get_child(probe_list, 0)); // Delete the oldest item
+                            lv_list_add_text(probe_list, received_probe_ssid.data);
+                            ui_added++;
+                        }
+                    } else {
                         lv_list_add_text(probe_list, received_probe_ssid.data);
                         ui_added++;
                     }
-                } else {
-                    lv_list_add_text(probe_list, received_probe_ssid.data);
-                    ui_added++;
                 }
             }
 
@@ -176,7 +179,7 @@ void stop_pcap(AppContext* context) {
     context->sniffer.pcap_active = false;
     if (!context->sniffer.probe_active) {
         esp_wifi_set_promiscuous(false);
-        esp_wifi_set_promiscuous_rx_cb(nullptr);
+        // DO NOT unregister the callback! Gated booleans are safer against Core 0 panics.
     }
     sd_logger_pcap_file_close(context); // Corrected function call
     if (btn_pcap_start) lv_label_set_text(lv_obj_get_child(btn_pcap_start, 0), "START PCAP");
@@ -202,7 +205,7 @@ void stop_probe_sniffer(AppContext* context) {
     context->sniffer.probe_active = false;
     if (!context->sniffer.pcap_active) {
         esp_wifi_set_promiscuous(false);
-        esp_wifi_set_promiscuous_rx_cb(nullptr);
+        // DO NOT unregister the callback! Gated booleans are safer against Core 0 panics.
     }
     if (btn_probe_start) lv_label_set_text(lv_obj_get_child(btn_probe_start, 0), "START PROBE SNIFF");
 }

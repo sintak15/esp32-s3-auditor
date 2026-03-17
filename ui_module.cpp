@@ -38,6 +38,7 @@ lv_obj_t *lora_chat_panel = nullptr;
 lv_obj_t *ta_lora_chat = nullptr;
 lv_obj_t *ta_lora_chat_input = nullptr;
 lv_obj_t *lora_log_panel = nullptr;
+lv_obj_t *ui_spinner = nullptr;
 
 extern void toggle_web_server();
 extern void spoof_mac();
@@ -103,6 +104,11 @@ void ui_build() {
   lv_label_set_text(title, LV_SYMBOL_SETTINGS " PENTEST");
   lv_obj_set_style_text_color(title, lv_color_hex(0x00FFCC), 0);
   lv_obj_align(title, LV_ALIGN_LEFT_MID, 2, 0);
+
+  ui_spinner = lv_spinner_create(status_bar, 1000, 60);
+  lv_obj_set_size(ui_spinner, 16, 16);
+  lv_obj_align(ui_spinner, LV_ALIGN_LEFT_MID, 130, 0);
+  lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); // Hidden by default
 
   lv_obj_t *icont=lv_obj_create(status_bar);
   lv_obj_set_size(icont, 130, 24); lv_obj_align(icont, LV_ALIGN_RIGHT_MID, 0, 0);

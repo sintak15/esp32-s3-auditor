@@ -9,6 +9,7 @@ static AppContext *context = nullptr;
 // Extern declarations for UI elements
 extern lv_obj_t *scan_list;
 extern lv_obj_t *lbl_scan_count;
+extern lv_obj_t *tabview;
 extern void cb_net_selected(lv_event_t* e);
 
 static bool deferred_render = false;
@@ -48,6 +49,13 @@ void run_ap_scan(AppContext *ctx) {
 
 void render_scan_list(AppContext *ctx) {
     if (!ctx || !scan_list || !lbl_scan_count) return;
+
+    // Optimization & Safety: Don't rebuild the list if the Scan tab isn't active.
+    // Prevents Use-After-Free crashes when navigating away after clicking a button.
+    if (tabview && lv_tabview_get_tab_act(tabview) != 1) { // 1 is the Scan tab
+        deferred_render = true;
+        return;
+    }
 
     lv_indev_t * indev = lv_indev_get_next(NULL);
     bool is_scrolling = scan_list ? lv_obj_is_scrolling(scan_list) : false;
