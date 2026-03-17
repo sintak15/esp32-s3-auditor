@@ -199,9 +199,9 @@ void ui_update_tick(lv_timer_t *timer) {
     // CRITICAL: Prevent crash if timer fires during teardown or before init
     if (!timer || !ui_context) return;
 
+    uint32_t start = millis();
     trace_enter("ui_update_tick");
 
-    uint32_t t0 = millis();
     uint32_t t_stage;
     
     // Guard against timer firing before ui_build() has finished assigning all objects
@@ -210,6 +210,9 @@ void ui_update_tick(lv_timer_t *timer) {
         !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel) {
         trace_exit("ui_update_tick");
         Serial.println("[UI] Skipping update - objects not ready");
+        if (millis() - start > 20) {
+            Serial.printf("[DIAG] slow: ui_update_tick %lu ms\n", (unsigned long)(millis() - start));
+        }
         return;
     }
 

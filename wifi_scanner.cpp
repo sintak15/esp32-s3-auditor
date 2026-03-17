@@ -193,9 +193,17 @@ void mac_str(const uint8_t *mac, char *out) {
 }
 
 void scan_tick(lv_timer_t *timer) {
+    uint32_t start = millis();
     trace_enter("scan_tick");
+    
     AppContext *ctx = (AppContext *)timer->user_data;
-    if (!ctx || ctx->wifi_scan.paused) { trace_exit("scan_tick"); return; }
+    if (!ctx || ctx->wifi_scan.paused) { 
+        trace_exit("scan_tick"); 
+        if (millis() - start > 20) {
+            Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)(millis() - start));
+        }
+        return; 
+    }
 
     if (deferred_render) {
         lv_indev_t * indev = lv_indev_get_next(NULL);
@@ -210,6 +218,9 @@ void scan_tick(lv_timer_t *timer) {
 
     if (n == WIFI_SCAN_RUNNING) {
         trace_exit("scan_tick");
+        if (millis() - start > 20) {
+            Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)(millis() - start));
+        }
         return; // Wait for the current scan to finish to prevent driver panic
     }
 
@@ -248,4 +259,9 @@ void scan_tick(lv_timer_t *timer) {
         ctx->wifi_scan.last_scan_ms = millis();
     }
     trace_exit("scan_tick");
+    
+    uint32_t dt = millis() - start;
+    if (dt > 20) {
+        Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)dt);
+    }
 }
