@@ -66,7 +66,7 @@ void process_pcap_queue(AppContext* context) {
         
         // Yield briefly every 4 writes so the watchdog doesn't starve if the SD card lags
         if ((++writes & 3) == 0) vTaskDelay(1); 
-        if (writes >= 16) break; // Stricter cap to maintain fast lv_timer_handler pacing
+        if (writes >= 8) break; // Ultra-strict cap to guarantee no lv_timer_handler starvation
     }
 }
 
@@ -118,7 +118,7 @@ void process_probe_queue(AppContext* context) {
         
         // Yield briefly every 4 writes so the watchdog doesn't starve
         if ((++processed & 3) == 0) vTaskDelay(1);
-        if (processed >= 12) break; // Stricter cap to maintain fast lv_timer_handler pacing
+        if (processed >= 8) break; // Ultra-strict cap to guarantee no lv_timer_handler starvation
     }
 }
 
