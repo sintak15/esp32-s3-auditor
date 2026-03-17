@@ -64,8 +64,10 @@ void render_scan_list(AppContext *ctx) {
                     char txt[128];
                     snprintf(txt, sizeof(txt), "[%s] %s (Ch:%d, %ddBm)", enc_str(ctx->wifi_scan.ap_list[i].enc), ctx->wifi_scan.ap_list[i].ssid, ctx->wifi_scan.ap_list[i].channel, ctx->wifi_scan.ap_list[i].rssi);
                     lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_WIFI, txt);
-                    lv_obj_set_user_data(btn, (void*)(intptr_t)i);
-                    lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
+                    if (btn) {
+                        lv_obj_set_user_data(btn, (void*)(intptr_t)i);
+                        lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
+                    }
                 }
             }
         } else if (ctx->wifi_scan.view == VIEW_STA) {
@@ -79,8 +81,10 @@ void render_scan_list(AppContext *ctx) {
                     char txt[128];
                     snprintf(txt, sizeof(txt), "%s (%ddBm)", mac, ctx->wifi_scan.sta_list[i].rssi);
                     lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_BLUETOOTH, txt);
-                    lv_obj_set_user_data(btn, (void*)(intptr_t)i);
-                    // Could add STA selected event callback if implemented later
+                    if (btn) {
+                        lv_obj_set_user_data(btn, (void*)(intptr_t)i);
+                        // Could add STA selected event callback if implemented later
+                    }
                 }
             }
         } else if (ctx->wifi_scan.view == VIEW_LINKED) {
@@ -112,9 +116,11 @@ void render_scan_list(AppContext *ctx) {
                             snprintf(txt, sizeof(txt), "  %s (%ddBm)", mac, ctx->wifi_scan.sta_list[j].rssi);
                             
                             lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_RIGHT, txt);
-                            lv_obj_set_user_data(btn, (void*)(intptr_t)i); // Pass AP index for targeting
-                            lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
-                            found_any = true;
+                            if (btn) {
+                                lv_obj_set_user_data(btn, (void*)(intptr_t)i); // Pass AP index for targeting
+                                lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
+                                found_any = true;
+                            }
                         }
                     }
                 }

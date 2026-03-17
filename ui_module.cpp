@@ -138,20 +138,6 @@ void ui_build() {
     if (ch!=tv_cont) lv_obj_add_flag(ch, LV_OBJ_FLAG_HIDDEN);
   }
 
-    // Ensure the stats modal is closed if we forcefully navigate away via home button
-    if (lora_stats_panel && !lv_obj_has_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_add_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (lora_nodedb_panel && !lv_obj_has_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_add_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (lora_chat_panel && !lv_obj_has_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_add_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (lora_log_panel && !lv_obj_has_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_add_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN);
-    }
-
   tab_home    =lv_tabview_add_tab(tabview, "Home");
   tab_scan    =lv_tabview_add_tab(tabview, "Scan");
   tab_pentest =lv_tabview_add_tab(tabview, "Pentest");
