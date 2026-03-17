@@ -161,7 +161,10 @@ void ui_update_tick(lv_timer_t *timer) {
                 ui_context->lora.log_data[sizeof(ui_context->lora.log_data) - 1] = '\0';
                 if (strlen(ui_context->lora.log_data) > 1900) { strcpy(ui_context->lora.log_data, "--- Buffer Cleared ---\n"); }
                 lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data);
-                lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF);
+                lv_indev_t * indev = lv_indev_get_next(NULL);
+                if (!((indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(ta_lora_log))) {
+                    lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF);
+                }
                 ui_context->lora.log_updated = false;
                 last_log_draw = millis();
             }
@@ -174,7 +177,10 @@ void ui_update_tick(lv_timer_t *timer) {
                 ui_context->lora.chat_data[sizeof(ui_context->lora.chat_data) - 1] = '\0';
                 if (strlen(ui_context->lora.chat_data) > 1900) { strcpy(ui_context->lora.chat_data, "--- Buffer Cleared ---\n"); }
                 lv_textarea_set_text(ta_lora_chat, ui_context->lora.chat_data);
-                lv_obj_scroll_to_y(ta_lora_chat, LV_COORD_MAX, LV_ANIM_OFF);
+                lv_indev_t * indev = lv_indev_get_next(NULL);
+                if (!((indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(ta_lora_chat))) {
+                    lv_obj_scroll_to_y(ta_lora_chat, LV_COORD_MAX, LV_ANIM_OFF);
+                }
                 ui_context->lora.chat_updated = false;
                 last_chat_draw = millis();
             }
@@ -215,7 +221,7 @@ void ui_update_tick(lv_timer_t *timer) {
                 static uint32_t last_nodedb_draw = 0;
                 
                 lv_indev_t * indev = lv_indev_get_next(NULL);
-                bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR);
+                bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(nodedb_list);
                 
                 if (!is_touched && (millis() - last_nodedb_draw > 2000)) { // Limit destructive UI rebuilds
                     lv_obj_clean(nodedb_list);

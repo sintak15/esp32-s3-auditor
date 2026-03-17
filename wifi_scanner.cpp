@@ -50,7 +50,8 @@ void render_scan_list(AppContext *ctx) {
     if (!ctx || !scan_list || !lbl_scan_count) return;
 
     lv_indev_t * indev = lv_indev_get_next(NULL);
-    if (indev && indev->proc.state == LV_INDEV_STATE_PR) {
+    bool is_scrolling = scan_list ? lv_obj_is_scrolling(scan_list) : false;
+    if ((indev && indev->proc.state == LV_INDEV_STATE_PR) || is_scrolling) {
         deferred_render = true;
         return;
     }
@@ -158,7 +159,8 @@ void scan_tick(lv_timer_t *timer) {
 
     if (deferred_render) {
         lv_indev_t * indev = lv_indev_get_next(NULL);
-        if (!indev || indev->proc.state == LV_INDEV_STATE_REL) {
+        bool is_scrolling = scan_list ? lv_obj_is_scrolling(scan_list) : false;
+        if ((!indev || indev->proc.state == LV_INDEV_STATE_REL) && !is_scrolling) {
             render_scan_list(ctx);
         }
     }

@@ -78,7 +78,8 @@ void process_probe_queue(AppContext* context) {
         if (strlen(received_probe_ssid.data) > 0 && context->sniffer.unique_probes.find(received_probe_ssid) == context->sniffer.unique_probes.end()) {
             if (context->sniffer.unique_probes.size() > MAX_LIST_MEMORY) {
                 lv_indev_t * indev = lv_indev_get_next(NULL);
-                if (indev && indev->proc.state == LV_INDEV_STATE_PR) {
+                bool is_scrolling = probe_list ? lv_obj_is_scrolling(probe_list) : false;
+                if ((indev && indev->proc.state == LV_INDEV_STATE_PR) || is_scrolling) {
                     // Defer clearing the list to prevent LVGL crash while user is touching the screen
                     xQueueSendToFront(context->sniffer.probe_queue, &received_probe_ssid, 0);
                     break;
@@ -92,7 +93,7 @@ void process_probe_queue(AppContext* context) {
             // Limit LVGL object creation per loop iteration
             if (probe_list && ui_added < 4) {
                 lv_indev_t * indev = lv_indev_get_next(NULL);
-                bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR);
+                bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(probe_list);
                 
                 uint32_t child_cnt = lv_obj_get_child_cnt(probe_list);
                 if (child_cnt >= 60) {
