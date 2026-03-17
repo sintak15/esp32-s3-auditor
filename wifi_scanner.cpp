@@ -53,6 +53,8 @@ void run_ap_scan(AppContext *ctx) {
 void render_scan_list(AppContext *ctx) {
     if (!ctx || !scan_list || !lbl_scan_count) return;
 
+    uint32_t t0 = millis();
+
     // Optimization & Safety: Don't rebuild the list if the Scan tab isn't active.
     // Prevents Use-After-Free crashes when navigating away after clicking a button.
     if (tabview && lv_tabview_get_tab_act(tabview) != 1) { // 1 is the Scan tab
@@ -182,6 +184,11 @@ void render_scan_list(AppContext *ctx) {
 
         xSemaphoreGive(ctx->wifi_scan.mutex);
     }
+
+    uint32_t dt = millis() - t0;
+    if (dt > 10) {
+        Serial.printf("[DIAG] slow: render_scan_list %lu ms\n", (unsigned long)dt);
+    }
 }
 
 void set_promiscuous_channel(uint8_t ch) {
@@ -199,7 +206,7 @@ void scan_tick(lv_timer_t *timer) {
     AppContext *ctx = (AppContext *)timer->user_data;
     if (!ctx || ctx->wifi_scan.paused) { 
         trace_exit("scan_tick"); 
-        if (millis() - start > 20) {
+        if (millis() - start > 10) {
             Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)(millis() - start));
         }
         return; 
@@ -218,7 +225,7 @@ void scan_tick(lv_timer_t *timer) {
 
     if (n == WIFI_SCAN_RUNNING) {
         trace_exit("scan_tick");
-        if (millis() - start > 20) {
+        if (millis() - start > 10) {
             Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)(millis() - start));
         }
         return; // Wait for the current scan to finish to prevent driver panic
@@ -261,7 +268,7 @@ void scan_tick(lv_timer_t *timer) {
     trace_exit("scan_tick");
     
     uint32_t dt = millis() - start;
-    if (dt > 20) {
+    if (dt > 10) {
         Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)dt);
     }
 }
