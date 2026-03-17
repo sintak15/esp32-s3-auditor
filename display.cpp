@@ -27,6 +27,14 @@ static lv_color_t *lvgl_buf2 = nullptr;
 
 static AppContext* ui_context = nullptr;
 
+// Thread-safe touch state memory to completely decouple LVGL from the I2C bus
+struct VolatileTouchState {
+    volatile bool pressed;
+    volatile int16_t x;
+    volatile int16_t y;
+};
+static VolatileTouchState shared_touch = {false, 0, 0};
+
 void set_ui_update_context(AppContext* context) {
     ui_context = context;
 }
@@ -71,35 +79,43 @@ void lvgl_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *cm) {
     }
 }
 
+// This LVGL callback now returns instantly, entirely immune to I2C bus hangs
 void lvgl_touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
-    static uint32_t last_touch_ms = 0;
     static int16_t lx = 0, ly = 0;
-    static lv_indev_state_t last_state = LV_INDEV_STATE_REL;
     
-    if (millis() - last_touch_ms < 50) { // Throttle I2C reads to 20Hz max
-        data->point.x = lx;
-        data->point.y = ly;
-        data->state = last_state;
-        return;
-    }
-    last_touch_ms = millis();
-
-    uint32_t t0 = millis();
-    TouchPoint pt = get_touch();
-    if (pt.pressed) {
-        lx = pt.x;
-        ly = pt.y;
-        last_state = LV_INDEV_STATE_PR;
+    // ISOLATION TEST: Uncomment this single line to permanently disable touch entirely
+    // data->state = LV_INDEV_STATE_REL; return;
+    
+    bool is_pressed = shared_touch.pressed;
+    if (is_pressed) {
+        lx = shared_touch.x;
+        ly = shared_touch.y;
+        data->state = LV_INDEV_STATE_PR;
     } else {
-        last_state = LV_INDEV_STATE_REL;
+        data->state = LV_INDEV_STATE_REL;
     }
-    data->state = last_state;
     data->point.x = lx;
     data->point.y = ly;
-    
-    uint32_t dt = millis() - t0;
-    if (dt > 5) {
-        Serial.printf("[TOUCH] read %lu ms\n", (unsigned long)dt);
+}
+
+// Dedicated background task to handle slow/unreliable I2C polling safely on Core 0
+static void touch_service_task(void *pv) {
+    for (;;) {
+        uint32_t t0 = millis();
+        TouchPoint pt = get_touch();
+        
+        shared_touch.pressed = pt.pressed;
+        if (pt.pressed) {
+            shared_touch.x = pt.x;
+            shared_touch.y = pt.y;
+        }
+        
+        uint32_t dt = millis() - t0;
+        if (dt > 15) {
+            Serial.printf("[TOUCH-WARN] I2C read stalled for %lu ms\n", (unsigned long)dt);
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(30)); // Poll safely at ~33Hz without starving FreeRTOS
     }
 }
 
@@ -114,6 +130,9 @@ void display_init() {
 
     Wire.begin(I2C_SDA, I2C_SCL, 100000);
     Wire.setTimeOut(20); // Prevent hardware I2C bus noise from permanently hanging the UI core
+
+    // Spin up the background I2C touch polling task away from the LVGL render core
+    xTaskCreatePinnedToCore(touch_service_task, "touch_task", 2048, NULL, 2, NULL, 0);
 
     tft.begin();
     tft.setRotation(0);
