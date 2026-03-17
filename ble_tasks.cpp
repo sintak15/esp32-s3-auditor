@@ -7,6 +7,7 @@
 #include <WiFi.h> // For WiFi.disconnect()
 #include <esp_wifi.h> // For esp_wifi_get_mode
 #include <esp_random.h>
+#include "ui_events.h"
 
 extern lv_obj_t *lbl_ble_status, *btn_ble_flood, *btn_ble_sniff;
 
@@ -170,10 +171,13 @@ void process_ble_sniff_ui(AppContext* context) {
     
     static uint32_t last_ui = 0;
     if (millis() - last_ui < 1000) return;
-    char buf[256];
-    snprintf(buf, sizeof(buf), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
-             pkt_count, unique_size, last_mac_str.c_str());
-    lv_label_set_text(lbl_ble_status, buf);
+    UiEvent* e = ui_queue.get_write_slot();
+    if (e) {
+        e->type = UiEvent::SET_BLE_STATUS;
+        snprintf(e->text, sizeof(e->text), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
+                 pkt_count, unique_size, last_mac_str.c_str());
+        ui_queue.commit_write();
+    }
     last_ui = millis();
 }
 

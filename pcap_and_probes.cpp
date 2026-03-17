@@ -3,6 +3,7 @@
 #include "sd_logger.h" // sd_logger.h now includes types.h
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include "ui_events.h"
 
 // Global AppContext instance (defined in main .ino file)
 extern AppContext g_app_context;
@@ -86,26 +87,27 @@ void process_probe_queue(AppContext* context) {
                     break;
                 }
                 context->sniffer.unique_probes.clear();
-                if (probe_list) lv_obj_clean(probe_list); // Guard against probe_list not being initialized
+                UiEvent* e = ui_queue.get_write_slot();
+                if (e) {
+                    e->type = UiEvent::CLEAR_PROBES;
+                    ui_queue.commit_write();
+                }
                 ui_added = 0;
             }
             context->sniffer.unique_probes.insert(received_probe_ssid);
             
-            // Limit LVGL object creation per loop iteration
             if (probe_list && tabview && lv_tabview_get_tab_act(tabview) == 5) {
                 if (ui_added < 4) {
                     lv_indev_t * indev = lv_indev_get_next(NULL);
                     bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(probe_list);
-                    
-                    uint32_t child_cnt = lv_obj_get_child_cnt(probe_list);
-                    if (child_cnt >= 60) {
-                        if (!is_touched) {
-                            lv_obj_del(lv_obj_get_child(probe_list, 0)); // Delete the oldest item
-                            lv_list_add_text(probe_list, received_probe_ssid.data);
-                            ui_added++;
+                    if (!is_touched) {
+                        UiEvent* e = ui_queue.get_write_slot();
+                        if (e) {
+                            e->type = UiEvent::ADD_PROBE;
+                            strncpy(e->text, received_probe_ssid.data, sizeof(e->text) - 1);
+                            e->text[sizeof(e->text) - 1] = '\0';
+                            ui_queue.commit_write();
                         }
-                    } else {
-                        lv_list_add_text(probe_list, received_probe_ssid.data);
                         ui_added++;
                     }
                 }
@@ -138,11 +140,15 @@ void process_channel_hop(AppContext* context) {
     
     static uint32_t last_ui = 0;
     if (context->sniffer.pcap_active && millis() - last_ui >= 250) {
-        lv_label_set_text_fmt(lbl_pcap_status,
-                              "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu",
-                              context->sniffer.pcap_ch_locked ? "#FF8800 LOCKED# " : "",
-                              context->sniffer.channel,
-                              context->sniffer.pcap_packet_count);
+        UiEvent* e = ui_queue.get_write_slot();
+        if (e) {
+            e->type = UiEvent::SET_PCAP_STATUS;
+            snprintf(e->text, sizeof(e->text), "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu",
+                     context->sniffer.pcap_ch_locked ? "#FF8800 LOCKED# " : "",
+                     context->sniffer.channel,
+                     context->sniffer.pcap_packet_count);
+            ui_queue.commit_write();
+        }
         last_ui = millis();
     }
 }
