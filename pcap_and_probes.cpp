@@ -73,6 +73,7 @@ void process_probe_queue(AppContext* context) {
     if (!context->sniffer.probe_active) return;
     ProbeSsid received_probe_ssid; // Receive into a struct
     int processed = 0;
+    int ui_added = 0; // Cap UI churn
     while (xQueueReceive(context->sniffer.probe_queue, &received_probe_ssid, 0) == pdTRUE) { // Pass address
         if (strlen(received_probe_ssid.data) > 0 && context->sniffer.unique_probes.find(received_probe_ssid) == context->sniffer.unique_probes.end()) {
             if (context->sniffer.unique_probes.size() > MAX_LIST_MEMORY) {
@@ -84,9 +85,17 @@ void process_probe_queue(AppContext* context) {
                 }
                 context->sniffer.unique_probes.clear();
                 if (probe_list) lv_obj_clean(probe_list); // Guard against probe_list not being initialized
+                ui_added = 0;
             }
             context->sniffer.unique_probes.insert(received_probe_ssid);
             lv_list_add_text(probe_list, received_probe_ssid.data);
+            
+            // Limit LVGL object creation per loop iteration
+            if (probe_list && ui_added < 4) {
+                lv_list_add_text(probe_list, received_probe_ssid.data);
+                ui_added++;
+            }
+
             if (sd_card_ready()) {
                 sd_log_probe(received_probe_ssid.data);
             }
@@ -95,6 +104,7 @@ void process_probe_queue(AppContext* context) {
         // Yield briefly every 8 writes so the watchdog doesn't starve
         if ((++processed & 7) == 0) vTaskDelay(1);
         if (processed >= 25) break; // Reduced from 50 to 25 to keep the UI buttery smooth
+        if (processed >= 16) break; // Reduced to keep the UI buttery smooth
     }
 }
 
@@ -112,10 +122,14 @@ void process_channel_hop(AppContext* context) {
     esp_wifi_set_channel(context->sniffer.channel, WIFI_SECOND_CHAN_NONE);
     context->sniffer.last_hop_ms = millis();
     
-    if (context->sniffer.pcap_active) {
-        lv_label_set_text_fmt(lbl_pcap_status, "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu", // Use context->sniffer.pcap_ch_locked
+    static uint32_t last_ui = 0;
+    if (context->sniffer.pcap_active && millis() - last_ui >= 250) {
+        lv_label_set_text_fmt(lbl_pcap_status,
+                              "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu",
                               context->sniffer.pcap_ch_locked ? "#FF8800 LOCKED# " : "",
-                              context->sniffer.channel, context->sniffer.pcap_packet_count);
+                              context->sniffer.channel,
+                              context->sniffer.pcap_packet_count);
+        last_ui = millis();
     }
 }
 
