@@ -12,6 +12,7 @@ extern lv_obj_t *lbl_ble_status, *btn_ble_flood, *btn_ble_sniff;
 
 static AppContext* ble_context = nullptr;
 static BLESniffCB* ble_sniffer_cb_instance = nullptr;
+static SemaphoreHandle_t ble_mutex = nullptr;
 
 // Implementation of the callback class
 BLESniffCB::BLESniffCB(AppContext* context) : app_context(context) {}
@@ -23,19 +24,23 @@ void BLESniffCB::onResult(const NimBLEAdvertisedDevice *dev) {
     MacAddress current_mac;
     memcpy(current_mac.data, dev->getAddress().getBase(), 6); // Explicitly get raw MAC address bytes
 
-    ble.packet_count++;
-    uint8_t slot = ble.ring_head % BLE_RING_SIZE;
-    strncpy(ble.ring_buf[slot].mac, dev->getAddress().toString().c_str(), 17);
-    ble.ring_buf[slot].mac[17] = 0;
-    ble.ring_buf[slot].rssi = dev->getRSSI();
-    ble.ring_buf[slot].fresh = true;
-    ble.ring_head++;
-    ble.unique_macs.insert(current_mac); // Insert the MacAddress struct
+    if (ble_mutex && xSemaphoreTake(ble_mutex, portMAX_DELAY) == pdTRUE) {
+        ble.packet_count++;
+        uint8_t slot = ble.ring_head % BLE_RING_SIZE;
+        strncpy(ble.ring_buf[slot].mac, dev->getAddress().toString().c_str(), 17);
+        ble.ring_buf[slot].mac[17] = 0;
+        ble.ring_buf[slot].rssi = dev->getRSSI();
+        ble.ring_buf[slot].fresh = true;
+        ble.ring_head++;
+        ble.unique_macs.insert(current_mac); // Insert the MacAddress struct safely
+        xSemaphoreGive(ble_mutex);
+    }
 }
 
 void ble_tasks_init(AppContext* context) {
     ble_context = context;
     ble_sniffer_cb_instance = new BLESniffCB(context);
+    ble_mutex = xSemaphoreCreateMutex();
 }
 
 void stop_ble(AppContext* context) {
@@ -107,7 +112,10 @@ void start_ble_sniff(AppContext* context) {
     esp_task_wdt_reset();
     context->ble.scanner->start(0, false, true);
 
-    context->ble.unique_macs.clear();
+    if (ble_mutex && xSemaphoreTake(ble_mutex, portMAX_DELAY) == pdTRUE) {
+        context->ble.unique_macs.clear();
+        xSemaphoreGive(ble_mutex);
+    }
     context->ble.packet_count = 0;
     context->ble.sniff_active = true;
     context->ble.busy = false;
@@ -142,27 +150,28 @@ void start_ble_flood(AppContext* context) {
 void process_ble_sniff_ui(AppContext* context) {
     if (!context->ble.sniff_active) return;
     BleState& ble = context->ble;
+    uint32_t unique_size = 0;
+    uint32_t pkt_count = 0;
+    String last_mac_str = "";
 
-    for (int i = 0; i < BLE_RING_SIZE; i++) {
-        if (!ble.ring_buf[i].fresh) continue;
-        ble.ring_buf[i].fresh = false;
-        
-        // The unique_macs set is updated in onResult.
-        // Here, we just update the last_mac for display and log.
-        // No need to re-insert into unique_macs here.
-        ble.last_mac = ble.ring_buf[i].mac; // Assign const char* directly to avoid temporary String allocation
-        
-        // Log to SD card
-        if (sd_card_ready()) {
-            sd_log_ble_sniff(millis(), ble.ring_buf[i].mac, ble.ring_buf[i].rssi);
+    if (ble_mutex && xSemaphoreTake(ble_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        for (int i = 0; i < BLE_RING_SIZE; i++) {
+            if (!ble.ring_buf[i].fresh) continue;
+            ble.ring_buf[i].fresh = false;
+            ble.last_mac = ble.ring_buf[i].mac; 
+            if (sd_card_ready()) sd_log_ble_sniff(millis(), ble.ring_buf[i].mac, ble.ring_buf[i].rssi);
         }
+        unique_size = ble.unique_macs.size();
+        pkt_count = ble.packet_count;
+        last_mac_str = ble.last_mac;
+        xSemaphoreGive(ble_mutex);
     }
-
+    
     static uint32_t last_ui = 0;
     if (millis() - last_ui < 1000) return;
     char buf[256];
-    snprintf(buf, sizeof(buf), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %u\nLast: %s",
-             ble.packet_count, (uint32_t)ble.unique_macs.size(), ble.last_mac.c_str());
+    snprintf(buf, sizeof(buf), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
+             pkt_count, unique_size, last_mac_str.c_str());
     lv_label_set_text(lbl_ble_status, buf);
     last_ui = millis();
 }

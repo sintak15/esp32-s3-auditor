@@ -127,7 +127,9 @@ void sd_log_scan(AppContext* context) {
                              enc_str(context->wifi_scan.ap_list[i].enc));
 
                     // Send to background task without blocking the UI
-                    xQueueSend(sd_log_queue, &msg, 0); 
+                    if (xQueueSend(sd_log_queue, &msg, 0) != pdPASS) {
+                        Serial.println("[SD_LOG] Warning: Queue full, dropped WiFi scan log.");
+                    }
                 }
             }
             xSemaphoreGive(context->wifi_scan.mutex);
@@ -149,12 +151,16 @@ void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl
     LogMsg msg1;
     msg1.target = LOG_TARGET_PMKID_HASH;
     snprintf(msg1.line, sizeof(msg1.line), "PMKID*%s*%s*%s\n", ph, ah, ssid); // Hashcat expects raw SSID
-    xQueueSend(sd_log_queue, &msg1, 0);
+    if (xQueueSend(sd_log_queue, &msg1, 0) != pdPASS) {
+        Serial.println("[SD_LOG] Warning: Queue full, dropped PMKID Hashcat log.");
+    }
 
     LogMsg msg2;
     msg2.target = LOG_TARGET_PMKID_CSV;
     snprintf(msg2.line, sizeof(msg2.line), "\"%s\",%s,%s,%s\n", ssid, ah, ch, ph);
-    xQueueSend(sd_log_queue, &msg2, 0);
+    if (xQueueSend(sd_log_queue, &msg2, 0) != pdPASS) {
+        Serial.println("[SD_LOG] Warning: Queue full, dropped PMKID CSV log.");
+    }
 }
 
 void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi) {
@@ -162,7 +168,9 @@ void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi) {
     LogMsg msg;
     msg.target = LOG_TARGET_BLE;
     snprintf(msg.line, sizeof(msg.line), "%lu,%s,%d\n", timestamp, mac, rssi);
-    xQueueSend(sd_log_queue, &msg, 0);
+    if (xQueueSend(sd_log_queue, &msg, 0) != pdPASS) {
+        Serial.println("[SD_LOG] Warning: Queue full, dropped BLE sniff log.");
+    }
 }
 
 void sd_log_probe(const char* ssid) {
@@ -170,7 +178,9 @@ void sd_log_probe(const char* ssid) {
     LogMsg msg;
     msg.target = LOG_TARGET_PROBE;
     snprintf(msg.line, sizeof(msg.line), "%s\n", ssid);
-    xQueueSend(sd_log_queue, &msg, 0);
+    if (xQueueSend(sd_log_queue, &msg, 0) != pdPASS) {
+        Serial.println("[SD_LOG] Warning: Queue full, dropped probe log.");
+    }
 }
 
 // --- PCAP File Management ---
