@@ -91,10 +91,6 @@ void process_pcap_queue(AppContext* context) {
         }
         context->sniffer.pcap_packet_count++;
         writes++;
-        
-        if ((writes & 0x07) == 0) {
-            esp_task_wdt_reset();
-        }
 
         if (writes >= 16) break;
         if (millis() - start_ms >= 10) break;
