@@ -122,7 +122,9 @@ static StatusSnapshot read_status_snapshot() {
 void ui_update_tick(lv_timer_t *timer) {
     if (!ui_context) return;
     // Guard against timer firing before ui_build() has finished assigning all objects
-    if (!lbl_batt || !lbl_batt_pct || !lbl_sd || !lbl_wifi || !lbl_msg || !tabview) return;
+    if (!lbl_batt || !lbl_batt_pct || !lbl_sd || !lbl_wifi || !lbl_msg || !tabview ||
+        !ta_lora_log || !lora_log_panel || !ta_lora_chat || !lora_chat_panel ||
+        !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel) return;
 
     StatusSnapshot ss = read_status_snapshot();
 
@@ -148,61 +150,38 @@ void ui_update_tick(lv_timer_t *timer) {
     lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? 0x00FF88 : 0xFF4444), 0);
 
     // Message icon (blinks when unread chat)
-    if (ui_context->lora.unread_chat) {
-        static bool msg_blink = false;
-        msg_blink = !msg_blink;
-        lv_obj_set_style_text_color(lbl_msg, lv_color_hex(msg_blink ? 0x00FF88 : 0x444444), 0);
-    } else {
-        lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0x444444), 0);
-    }
+    bool unread_chat_status = false;
+    if (ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        unread_chat_status = ui_context->lora.unread_chat;
 
-    // WiFi icon colour
-    uint32_t wc = 0xFFFFFF;
-    if (ui_context->pentest.current_mode == PT_DEAUTH) wc = 0xFF4444;
-    else if (ui_context->pentest.current_mode == PT_BEACON) wc = 0xFFFF00;
-    else if (ui_context->pentest.current_mode == PT_PMKID) wc = 0x4488FF;
-    else if (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active) wc = 0xFF8800;
-    else if (ui_context->web_server_active) wc = 0xFF00FF;
-    else if (!ui_context->wifi_scan.paused) wc = 0x00FFFF;
-    lv_obj_set_style_text_color(lbl_wifi, lv_color_hex(wc), 0);
-
-    // Update LoRa log in terminal
-    if (ta_lora_log && lora_log_panel && !lv_obj_has_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN)) {
-        if (ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        // Update LoRa log in terminal
+        if (ta_lora_log && lora_log_panel && !lv_obj_has_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN)) {
             static uint32_t last_log_draw = 0;
-            // Throttle heavy text area recalculations to max 4 times per second to prevent UI freeze
             if (ui_context->lora.log_updated && millis() - last_log_draw > 250) {
                 ui_context->lora.log_data[sizeof(ui_context->lora.log_data) - 1] = '\0';
                 if (strlen(ui_context->lora.log_data) > 1900) { strcpy(ui_context->lora.log_data, "--- Buffer Cleared ---\n"); }
-                lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data); // Redraw
-                lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF);   // Jump to bottom
-                ui_context->lora.log_updated = false;                         // Mark as rendered
+                lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data);
+                lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF);
+                ui_context->lora.log_updated = false;
                 last_log_draw = millis();
             }
-            xSemaphoreGive(ui_context->lora.mutex);
         }
-    }
 
-    // Update LoRa Chat Panel
-    if (ta_lora_chat && lora_chat_panel && !lv_obj_has_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN)) {
-        if (ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        // Update LoRa Chat Panel
+        if (ta_lora_chat && lora_chat_panel && !lv_obj_has_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN)) {
             static uint32_t last_chat_draw = 0;
-            // Throttle heavy text area recalculations to max 4 times per second to prevent UI freeze
             if (ui_context->lora.chat_updated && millis() - last_chat_draw > 250) {
                 ui_context->lora.chat_data[sizeof(ui_context->lora.chat_data) - 1] = '\0';
                 if (strlen(ui_context->lora.chat_data) > 1900) { strcpy(ui_context->lora.chat_data, "--- Buffer Cleared ---\n"); }
-                lv_textarea_set_text(ta_lora_chat, ui_context->lora.chat_data); // Redraw
-                lv_obj_scroll_to_y(ta_lora_chat, LV_COORD_MAX, LV_ANIM_OFF);    // Jump to bottom
-                ui_context->lora.chat_updated = false;                          // Mark as rendered
+                lv_textarea_set_text(ta_lora_chat, ui_context->lora.chat_data);
+                lv_obj_scroll_to_y(ta_lora_chat, LV_COORD_MAX, LV_ANIM_OFF);
+                ui_context->lora.chat_updated = false;
                 last_chat_draw = millis();
             }
-            xSemaphoreGive(ui_context->lora.mutex);
         }
-    }
 
-    // Update LoRa Stats Panel
-    if (lbl_lora_stats && lora_stats_panel && !lv_obj_has_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN)) {
-        if (ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        // Update LoRa Stats Panel
+        if (lbl_lora_stats && lora_stats_panel && !lv_obj_has_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN)) {
             if (ui_context->lora.stats.updated) {
                 char buf[512];
                 snprintf(buf, sizeof(buf),
@@ -228,29 +207,33 @@ void ui_update_tick(lv_timer_t *timer) {
                 lv_label_set_text(lbl_lora_stats, buf);
                 ui_context->lora.stats.updated = false;
             }
-            xSemaphoreGive(ui_context->lora.mutex);
         }
-    }
 
-    // Update LoRa Node DB Panel
-    if (nodedb_list && lora_nodedb_panel && !lv_obj_has_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN)) {
-        if (ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        // Update LoRa Node DB Panel
+        if (nodedb_list && lora_nodedb_panel && !lv_obj_has_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN)) {
             if (ui_context->lora.nodedb_updated) {
                 lv_obj_clean(nodedb_list);
                 for (const auto& n : ui_context->lora.known_nodes) {
                     char buf[128];
                     uint32_t age = (millis() - n.last_heard) / 1000;
                     char safe_long_name[sizeof(n.long_name) + 1];
-                    strncpy(safe_long_name, n.long_name, sizeof(n.long_name));
-                    safe_long_name[sizeof(n.long_name)] = '\0';
-                    snprintf(buf, sizeof(buf), "%s\n!%08lx  %lus ago  SNR: %d", 
+                    snprintf(safe_long_name, sizeof(safe_long_name), "%.*s", sizeof(n.long_name), n.long_name);
+                    snprintf(buf, sizeof(buf), "%s\n!%08lx  %lus ago  SNR: %d",
                         safe_long_name[0] != '\0' ? safe_long_name : "Unknown",
                         (unsigned long)n.num, (unsigned long)age, n.snr);
                     lv_list_add_text(nodedb_list, buf);
                 }
                 ui_context->lora.nodedb_updated = false;
             }
-            xSemaphoreGive(ui_context->lora.mutex);
         }
+        xSemaphoreGive(ui_context->lora.mutex);
+    }
+
+    if (unread_chat_status) {
+        static bool msg_blink = false;
+        msg_blink = !msg_blink;
+        lv_obj_set_style_text_color(lbl_msg, lv_color_hex(msg_blink ? 0x00FF88 : 0x444444), 0);
+    } else {
+        lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0x444444), 0);
     }
 }
