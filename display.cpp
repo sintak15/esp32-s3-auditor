@@ -279,6 +279,8 @@ void ui_update_tick(lv_timer_t *timer) {
                     log_copy_buf[2047] = '\0';
                     
                     lv_textarea_set_text(ta_lora_log, log_copy_buf);
+                } else {
+                    lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data);
                 }
                 lv_indev_t * indev = lv_indev_get_next(NULL);
                 if (!((indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(ta_lora_log))) {
@@ -307,6 +309,8 @@ void ui_update_tick(lv_timer_t *timer) {
                     chat_copy_buf[2047] = '\0';
                     
                     lv_textarea_set_text(ta_lora_chat, chat_copy_buf);
+                } else {
+                    lv_textarea_set_text(ta_lora_chat, ui_context->lora.chat_data);
                 }
                 lv_indev_t * indev = lv_indev_get_next(NULL);
                 if (!((indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(ta_lora_chat))) {
