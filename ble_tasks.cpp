@@ -103,6 +103,14 @@ void stop_ble(AppContext* context) {
 
 void start_ble_sniff(AppContext* context) {
     if (context->ble.busy) return;
+    
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
+        Serial.println("[BLE] start denied: low internal heap");
+        if (btn_ble_sniff) lv_label_set_text(lv_obj_get_child(btn_ble_sniff, 0), "START BLE SNIFF");
+        lv_label_set_text(lbl_ble_status, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
+        return;
+    }
+    
     diag_ble_state("start_ble_sniff:enter", context);
     context->ble.busy = true;
 
@@ -115,7 +123,7 @@ void start_ble_sniff(AppContext* context) {
     if (esp_wifi_get_mode(&mode) == ESP_OK) {
         WiFi.disconnect(true);
     }
-    esp_task_wdt_reset(); delay(50); esp_task_wdt_reset();
+    delay(50);
 
     if (!context->ble.nimble_ready) {
         NimBLEDevice::init("");
@@ -126,7 +134,6 @@ void start_ble_sniff(AppContext* context) {
     context->ble.scanner->setActiveScan(true);
     context->ble.scanner->setInterval(100);
     context->ble.scanner->setWindow(99);
-    esp_task_wdt_reset();
     context->ble.scanner->start(0, false, true);
 
     if (ble_mutex && xSemaphoreTake(ble_mutex, portMAX_DELAY) == pdTRUE) {
@@ -141,6 +148,14 @@ void start_ble_sniff(AppContext* context) {
 
 void start_ble_flood(AppContext* context) {
     if (context->ble.busy) return;
+    
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
+        Serial.println("[BLE] start denied: low internal heap");
+        if (btn_ble_flood) lv_label_set_text(lv_obj_get_child(btn_ble_flood, 0), "START BLE FLOOD");
+        lv_label_set_text(lbl_ble_status, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
+        return;
+    }
+
     diag_ble_state("start_ble_flood:enter", context);
     context->ble.busy = true;
 
@@ -153,7 +168,6 @@ void start_ble_flood(AppContext* context) {
     if (esp_wifi_get_mode(&mode) == ESP_OK) {
         WiFi.disconnect(true);
     }
-    esp_task_wdt_reset();
 
     // Init NimBLE once here — process_ble_flood will reuse it each cycle
     // rather than deinit/reinit every 300ms (which causes PC=0x0 crash)
@@ -224,7 +238,6 @@ void process_ble_flood(AppContext* context) {
     uint32_t t = millis();
     adv->stop();
     Serial.printf("[BLE] adv->stop dt=%lu\n", (unsigned long)(millis() - t));
-    esp_task_wdt_reset();
 
     // Randomize the 6 filler bytes in the Apple proximity payload so each
     // beacon looks like a different device

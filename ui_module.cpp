@@ -135,6 +135,10 @@ void ui_build() {
   lv_obj_set_size(tabview, SCREEN_W, SCREEN_H-32);
   lv_obj_align(tabview, LV_ALIGN_BOTTOM_LEFT, 0, 0);
   lv_obj_set_style_bg_color(tabview, lv_color_hex(0x000000), 0);
+  
+  // ISOLATION TEST 3: Disable all tabview switch animations
+  lv_obj_set_style_anim_time(tabview, 0, 0);
+
   lv_obj_t *tv_cont=lv_tabview_get_content(tabview);
   no_scroll(tv_cont);
   lv_obj_set_scrollbar_mode(tabview, LV_SCROLLBAR_MODE_OFF);
@@ -259,19 +263,21 @@ void ui_build() {
   lv_label_set_recolor(lbl_pt_target,true);
   lv_label_set_text(lbl_pt_target,"#888888 Select a target from SCAN#");
   lv_obj_set_width(lbl_pt_target,SCREEN_W-20);
-  lv_label_set_long_mode(lbl_pt_target,LV_LABEL_LONG_SCROLL_CIRCULAR);
+  // FIX: SCROLL_CIRCULAR runs an infinite animation timer that invalidates the screen even when idle
+  lv_label_set_long_mode(lbl_pt_target,LV_LABEL_LONG_DOT);
   lv_obj_align(lbl_pt_target,LV_ALIGN_TOP_MID,0,2);
   lbl_pt_bssid=lv_label_create(tab_pentest);
   lv_obj_set_style_text_color(lbl_pt_bssid,lv_color_hex(0x555555),0);
   lv_obj_set_style_text_font(lbl_pt_bssid,&lv_font_montserrat_14,0);
   lv_label_set_text(lbl_pt_bssid,"---");
-  lv_obj_align_to(lbl_pt_bssid,lbl_pt_target,LV_ALIGN_OUT_BOTTOM_MID,0,2);
+  // Prevent scrolling label from cascading full-screen redraws:
+  lv_obj_align(lbl_pt_bssid,LV_ALIGN_TOP_MID,0,24);
   lbl_pt_status=lv_label_create(tab_pentest);
   lv_label_set_recolor(lbl_pt_status,true);
   lv_obj_set_style_text_font(lbl_pt_status,&lv_font_montserrat_14,0);
   lv_label_set_text(lbl_pt_status,"#444444 IDLE#");
   lv_obj_set_width(lbl_pt_status,SCREEN_W-20);
-  lv_obj_align_to(lbl_pt_status,lbl_pt_bssid,LV_ALIGN_OUT_BOTTOM_MID,0,4);
+  lv_obj_align(lbl_pt_status,LV_ALIGN_TOP_MID,0,42);
   int y=62;
   btn_deauth=make_atk_btn(tab_pentest,LV_SYMBOL_WARNING   " DEAUTH TEST",   &style_btn_red,   0xFF4444,cb_start_deauth,y); y+=42;
   btn_beacon=make_atk_btn(tab_pentest,LV_SYMBOL_AUDIO     " BEACON FLOOD",  &style_btn_orange,0xFFAA00,cb_start_beacon,y); y+=42;

@@ -3,6 +3,7 @@
 #include "sd_logger.h" // sd_logger.h now includes types.h
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <esp_heap_caps.h>
 #include "ui_events.h"
 
 // Global AppContext instance (defined in main .ino file)
@@ -29,16 +30,21 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
     uint8_t *frame = pkt->payload;
     uint16_t len = pkt->rx_ctrl.sig_len;
 
-    if (sniffer.pcap_active && len <= MAX_PCAP_PACKET_SIZE) {
-        pcap_record_t rec;
-        uint64_t us = esp_timer_get_time(); // Get microsecond timestamp
-        rec.ts_sec = us / 1000000;
-        rec.ts_usec = us % 1000000;
-        rec.len = len;
-        memcpy(rec.payload, frame, len);
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        xQueueSendFromISR(sniffer.pcap_queue, &rec, &xHigherPriorityTaskWoken);
-        if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
+    if (sniffer.pcap_active && sniffer.pcap_file && len <= MAX_PCAP_PACKET_SIZE) {
+        // Apply backpressure to prevent queue memory exhaustion
+        if (uxQueueMessagesWaitingFromISR(sniffer.pcap_queue) > (PCAP_QUEUE_SIZE - 4)) {
+            // Drop packet safely
+        } else {
+            pcap_record_t rec;
+            uint64_t us = esp_timer_get_time(); // Get microsecond timestamp
+            rec.ts_sec = us / 1000000;
+            rec.ts_usec = us % 1000000;
+            rec.len = len;
+            memcpy(rec.payload, frame, len);
+            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+            xQueueSendFromISR(sniffer.pcap_queue, &rec, &xHigherPriorityTaskWoken);
+            if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
+        }
     }
 
     if (sniffer.probe_active && type == WIFI_PKT_MGMT && frame[0] == 0x40) {
@@ -58,13 +64,30 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
 }
 
 void process_pcap_queue(AppContext* context) {
-    if (!context->sniffer.pcap_active || !context->sniffer.pcap_file) return;
+    if (!context->sniffer.pcap_queue) return;
     pcap_record_t rec;
     int writes = 0;
     uint32_t start = millis();
 
     while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0) == pdTRUE) { // Pass address
-        sd_logger_pcap_file_write(context, &rec); // Corrected function call
+        if (!context->sniffer.pcap_active || !context->sniffer.pcap_file) {
+            // Drain safely if we are no longer active
+            continue;
+        }
+        
+        if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 24576) {
+            Serial.println("[PCAP] stopping capture: low internal heap");
+            context->sniffer.pcap_active = false;
+            sd_logger_pcap_file_close(context);
+            continue; // Continue loop to fast-drain remaining items out of memory
+        }
+
+        if (!sd_logger_pcap_file_write(context, &rec)) {
+            Serial.println("[PCAP] stopping due to write failure");
+            context->sniffer.pcap_active = false;
+            sd_logger_pcap_file_close(context);   // 🔴 CLOSE and strictly nullify
+            continue; // Continue loop to fast-drain remaining items out of memory
+        }
         context->sniffer.pcap_packet_count++;
         
         // Yield briefly every 4 writes so the watchdog doesn't starve if the SD card lags
@@ -99,11 +122,14 @@ void process_probe_queue(AppContext* context) {
                     break;
                 }
                 context->sniffer.unique_probes.clear();
+                // ISOLATION TEST B: Comment out probe UI churn
+                /*
                 UiEvent* e = ui_queue.get_write_slot();
                 if (e) {
                     e->type = UiEvent::CLEAR_PROBES;
                     ui_queue.commit_write();
                 }
+                */
                 ui_added = 0;
             }
             context->sniffer.unique_probes.insert(received_probe_ssid);
@@ -113,6 +139,8 @@ void process_probe_queue(AppContext* context) {
                     lv_indev_t * indev = lv_indev_get_next(NULL);
                     bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(probe_list);
                     if (!is_touched) {
+                        // ISOLATION TEST B: Comment out probe UI churn
+                        /*
                         UiEvent* e = ui_queue.get_write_slot();
                         if (e) {
                             e->type = UiEvent::ADD_PROBE;
@@ -120,6 +148,7 @@ void process_probe_queue(AppContext* context) {
                             e->text[sizeof(e->text) - 1] = '\0';
                             ui_queue.commit_write();
                         }
+                        */
                         ui_added++;
                     }
                 }
@@ -159,7 +188,8 @@ void process_channel_hop(AppContext* context) {
     context->sniffer.last_hop_ms = millis();
     
     static uint32_t last_ui = 0;
-    if (context->sniffer.pcap_active && millis() - last_ui >= 250) {
+    // ISOLATION TEST C: Throttle to 500ms
+    if (context->sniffer.pcap_active && millis() - last_ui >= 500) {
         UiEvent* e = ui_queue.get_write_slot();
         if (e) {
             e->type = UiEvent::SET_PCAP_STATUS;
@@ -192,6 +222,12 @@ void start_pcap(AppContext* context) {
     if (!sd_logger_pcap_file_open(context)) { // Use sd_logger's function
         Serial.println("[PCAP] Failed to open PCAP file.");
         context->sniffer.pcap_active = false;
+        context->sniffer.pcap_file = File(); // Invalidate file object immediately
+        
+        // Flush queue
+        pcap_record_t dump;
+        while (xQueueReceive(context->sniffer.pcap_queue, &dump, 0) == pdTRUE);
+        
         return;
     }
     context->sniffer.pcap_packet_count = 0;
@@ -208,6 +244,7 @@ void stop_pcap(AppContext* context) {
         // DO NOT unregister the callback! Gated booleans are safer against Core 0 panics.
     }
     sd_logger_pcap_file_close(context); // Corrected function call
+    context->sniffer.pcap_file = File(); // explicitly invalidate
     if (btn_pcap_start) lv_label_set_text(lv_obj_get_child(btn_pcap_start, 0), "START PCAP");
     lv_label_set_text(lbl_pcap_status, "#00FF88 Capture saved to SD#");
 }

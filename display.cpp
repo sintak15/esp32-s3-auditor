@@ -32,6 +32,10 @@ void set_ui_update_context(AppContext* context) {
 
 TouchPoint get_touch() {
     TouchPoint pt = {0, 0, false};
+
+    // ISOLATION TEST 2: Uncomment to stub touch completely
+    // return pt;
+
     Wire.beginTransmission(TOUCH_ADDR);
     Wire.write(0x02);
     if (Wire.endTransmission() != 0) return pt;
@@ -48,6 +52,7 @@ TouchPoint get_touch() {
 }
 
 void lvgl_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *cm) {
+    uint32_t t0 = millis();
     uint32_t w = (area->x2 - area->x1 + 1);
     uint32_t h = (area->y2 - area->y1 + 1);
     tft.startWrite();
@@ -55,20 +60,45 @@ void lvgl_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *cm) {
     tft.pushColors((uint16_t *)cm, w * h, true);
     tft.endWrite();
     lv_disp_flush_ready(drv);
+    
+    uint32_t dt = millis() - t0;
+    if (dt > 10) {
+        Serial.printf("[FLUSH] %lux%lu dt=%lu area=(%d,%d)-(%d,%d)\n",
+            (unsigned long)w, (unsigned long)h, (unsigned long)dt,
+            area->x1, area->y1, area->x2, area->y2);
+    }
 }
 
 void lvgl_touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
+    static uint32_t last_touch_ms = 0;
     static int16_t lx = 0, ly = 0;
+    static lv_indev_state_t last_state = LV_INDEV_STATE_REL;
+    
+    if (millis() - last_touch_ms < 50) { // Throttle I2C reads to 20Hz max
+        data->point.x = lx;
+        data->point.y = ly;
+        data->state = last_state;
+        return;
+    }
+    last_touch_ms = millis();
+
+    uint32_t t0 = millis();
     TouchPoint pt = get_touch();
     if (pt.pressed) {
         lx = pt.x;
         ly = pt.y;
-        data->state = LV_INDEV_STATE_PR;
+        last_state = LV_INDEV_STATE_PR;
     } else {
-        data->state = LV_INDEV_STATE_REL;
+        last_state = LV_INDEV_STATE_REL;
     }
+    data->state = last_state;
     data->point.x = lx;
     data->point.y = ly;
+    
+    uint32_t dt = millis() - t0;
+    if (dt > 5) {
+        Serial.printf("[TOUCH] read %lu ms\n", (unsigned long)dt);
+    }
 }
 
 void display_init() {
@@ -89,14 +119,16 @@ void display_init() {
     tft.fillScreen(TFT_BLACK);
 
     lv_init();
-    lvgl_buf1 = (lv_color_t *)ps_malloc(SCREEN_W * SCREEN_H * sizeof(lv_color_t));
-    lvgl_buf2 = (lv_color_t *)ps_malloc(SCREEN_W * SCREEN_H * sizeof(lv_color_t));
+    // Reduce draw buffer size from full screen to a smaller strip (40 rows)
+    // This forces LVGL to render in smaller, faster chunks, reducing worst-case flush latency
+    lvgl_buf1 = (lv_color_t *)ps_malloc(SCREEN_W * 40 * sizeof(lv_color_t));
+    lvgl_buf2 = (lv_color_t *)ps_malloc(SCREEN_W * 40 * sizeof(lv_color_t));
     if (!lvgl_buf1 || !lvgl_buf2) {
         Serial.println("FATAL: PSRAM alloc failed");
         while (1) delay(1000);
     }
 
-    lv_disp_draw_buf_init(&draw_buf, lvgl_buf1, lvgl_buf2, SCREEN_W * SCREEN_H);
+    lv_disp_draw_buf_init(&draw_buf, lvgl_buf1, lvgl_buf2, SCREEN_W * 40);
     lv_disp_drv_init(&disp_drv);
     disp_drv.hor_res = SCREEN_W;
     disp_drv.ver_res = SCREEN_H;
@@ -121,34 +153,63 @@ static StatusSnapshot read_status_snapshot() {
 
 
 void ui_update_tick(lv_timer_t *timer) {
+    // ISOLATION TEST A: Uncomment to completely disable UI tick updates
+    // return;
+
+    uint32_t t0 = millis();
+    uint32_t t_stage;
+    
     if (!ui_context) return;
     // Guard against timer firing before ui_build() has finished assigning all objects
     if (!lbl_batt || !lbl_batt_pct || !lbl_sd || !lbl_wifi || !lbl_msg || !tabview ||
         !ta_lora_log || !lora_log_panel || !ta_lora_chat || !lora_chat_panel ||
         !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel) return;
 
+    t_stage = millis();
+    static int last_batteryPct = -1;
+    static bool last_isCharging = false;
+    static bool last_sdMounted = false;
+    static int last_batt_col = -1;
+
     StatusSnapshot ss = read_status_snapshot();
 
     // Battery
     uint32_t batt_col = ss.batteryPct < 20 ? 0xFF4444 : ss.batteryPct < 50 ? 0xFFFF00 : 0xFFFFFF;
     if (ss.isCharging) {
-        lv_label_set_text(lbl_batt, LV_SYMBOL_CHARGE);
         batt_col = 0x00FF88; // Bright green when charging
-    } else {
-        if (ss.batteryPct > 80) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_FULL);
-        else if (ss.batteryPct > 60) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_3);
-        else if (ss.batteryPct > 35) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_2);
-        else if (ss.batteryPct > 15) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_1);
-        else lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_EMPTY);
     }
-    lv_obj_set_style_text_color(lbl_batt, lv_color_hex(batt_col), 0);
-    char bpbuf[8];
-    snprintf(bpbuf, sizeof(bpbuf), "%d%%", ss.batteryPct);
-    lv_label_set_text(lbl_batt_pct, bpbuf);
-    lv_obj_set_style_text_color(lbl_batt_pct, lv_color_hex(batt_col), 0);
+    
+    if (ss.batteryPct != last_batteryPct || ss.isCharging != last_isCharging) {
+        if (ss.isCharging) {
+            lv_label_set_text(lbl_batt, LV_SYMBOL_CHARGE);
+        } else {
+            if (ss.batteryPct > 80) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_FULL);
+            else if (ss.batteryPct > 60) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_3);
+            else if (ss.batteryPct > 35) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_2);
+            else if (ss.batteryPct > 15) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_1);
+            else lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_EMPTY);
+        }
+        char bpbuf[8];
+        snprintf(bpbuf, sizeof(bpbuf), "%d%%", ss.batteryPct);
+        lv_label_set_text(lbl_batt_pct, bpbuf);
+        last_batteryPct = ss.batteryPct;
+        last_isCharging = ss.isCharging;
+    }
 
-    // SD icon
-    lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? 0x00FF88 : 0xFF4444), 0);
+    if ((int)batt_col != last_batt_col) {
+        lv_obj_set_style_text_color(lbl_batt, lv_color_hex(batt_col), 0);
+        lv_obj_set_style_text_color(lbl_batt_pct, lv_color_hex(batt_col), 0);
+        last_batt_col = batt_col;
+    }
+
+    if (ss.sdMounted != last_sdMounted) {
+        lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? 0x00FF88 : 0xFF4444), 0);
+        last_sdMounted = ss.sdMounted;
+    }
+
+    if (millis() - t_stage > 5) Serial.printf("[UI] battery block %lu ms\n", (unsigned long)(millis() - t_stage));
+
+    t_stage = millis();
 
     // Message icon (blinks when unread chat)
     bool unread_chat_status = false;
@@ -241,13 +302,31 @@ void ui_update_tick(lv_timer_t *timer) {
         }
         xSemaphoreGive(ui_context->lora.mutex);
     }
+    if (millis() - t_stage > 5) Serial.printf("[UI] lora block %lu ms\n", (unsigned long)(millis() - t_stage));
 
-    if (unread_chat_status) {
-        static bool msg_blink = false;
-        msg_blink = !msg_blink;
-        lv_obj_set_style_text_color(lbl_msg, lv_color_hex(msg_blink ? 0x00FF88 : 0x444444), 0);
-    } else {
-        lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0x444444), 0);
+    t_stage = millis();
+    static bool last_unread_chat = false;
+    static uint32_t last_blink = 0;
+    static int last_msg_color = -1;
+
+    if (unread_chat_status) { // Blink continuously if unread
+        if (millis() - last_blink > 500) {
+            static bool msg_blink = false;
+            msg_blink = !msg_blink;
+            int new_color = msg_blink ? 0x00FF88 : 0x444444;
+            if (new_color != last_msg_color) {
+                lv_obj_set_style_text_color(lbl_msg, lv_color_hex(new_color), 0);
+                last_msg_color = new_color;
+            }
+            last_blink = millis();
+        }
+        last_unread_chat = true;
+    } else if (last_unread_chat) { // Revert to gray once only
+        if (last_msg_color != 0x444444) {
+            lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0x444444), 0);
+            last_msg_color = 0x444444;
+        }
+        last_unread_chat = false;
     }
 
     // Activity Spinner
@@ -255,17 +334,28 @@ void ui_update_tick(lv_timer_t *timer) {
         bool is_active = (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active || 
                           ui_context->ble.sniff_active || ui_context->ble.flood_active || 
                           ui_context->pentest.current_mode != PT_NONE);
-        if (is_active && lv_obj_has_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN)) {
-            lv_obj_clear_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN);
-        } else if (!is_active && !lv_obj_has_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN)) {
-            lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN);
+        static int last_is_active = -1;
+        if ((int)is_active != last_is_active) {
+            // FIX: Hidden spinners STILL run animation timers and invalidate the screen. 
+            // We must pause the animation entirely when hidden.
+            if (is_active) { lv_obj_clear_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); lv_anim_del(ui_spinner, NULL); }
+            else { lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); lv_anim_del(ui_spinner, NULL); }
+            last_is_active = is_active;
         }
     }
 
     // Screen Dimming Timeout (60 seconds)
-    if (lv_disp_get_inactive_time(NULL) > 60000) {
-        digitalWrite(TFT_BL, LOW);
-    } else {
-        digitalWrite(TFT_BL, HIGH);
+    static int last_backlight = -1;
+    int current_backlight = (lv_disp_get_inactive_time(NULL) > 60000) ? LOW : HIGH;
+    if (current_backlight != last_backlight) {
+        digitalWrite(TFT_BL, current_backlight);
+        last_backlight = current_backlight;
+    }
+
+    if (millis() - t_stage > 5) Serial.printf("[UI] misc block %lu ms\n", (unsigned long)(millis() - t_stage));
+
+    uint32_t dt = millis() - t0;
+    if (dt > 10) {
+        Serial.printf("[UI] ui_update_tick %lu ms\n", (unsigned long)dt);
     }
 }

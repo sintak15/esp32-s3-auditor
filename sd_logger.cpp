@@ -2,6 +2,7 @@
 #include "constants.h"
 #include <SD_MMC.h>
 #include "wifi_scanner.h"
+#include <esp_heap_caps.h>
 
 static bool sd_ready = false;
 
@@ -19,6 +20,11 @@ struct LogMsg {
     char line[MAX_LOG_LINE_LEN];
 };
 static QueueHandle_t sd_log_queue = nullptr;
+
+// Global helper to guard against SD MMC driver crashing due to DMA buffer starvation
+static bool sd_has_working_heap(size_t need = 24576) {
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > need;
+}
 
 const char* get_file_path(LogTarget target) {
     switch(target) {
@@ -103,7 +109,7 @@ void sd_reinit() {
 }
 
 void sd_log_scan(AppContext* context) {
-    if (!sd_ready || !sd_log_queue) return;
+    if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     
     double lat = 0.0;
     double lon = 0.0;
@@ -138,7 +144,7 @@ void sd_log_scan(AppContext* context) {
 }
 
 void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl_mac, const char *ssid) {
-    if (!sd_ready || !sd_log_queue) return;
+    if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     auto hex = [](const uint8_t *b, int n, char *o) {
         for (int i = 0; i < n; i++) sprintf(o + i * 2, "%02x", b[i]);
         o[n * 2] = 0;
@@ -164,7 +170,7 @@ void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl
 }
 
 void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi) {
-    if (!sd_ready || !sd_log_queue) return;
+    if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     LogMsg msg;
     msg.target = LOG_TARGET_BLE;
     snprintf(msg.line, sizeof(msg.line), "%lu,%s,%d\n", timestamp, mac, rssi);
@@ -174,7 +180,7 @@ void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi) {
 }
 
 void sd_log_probe(const char* ssid) {
-    if (!sd_ready || !sd_log_queue) return;
+    if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     LogMsg msg;
     msg.target = LOG_TARGET_PROBE;
     snprintf(msg.line, sizeof(msg.line), "%s\n", ssid);
@@ -187,33 +193,63 @@ void sd_log_probe(const char* ssid) {
 
 bool sd_logger_pcap_file_open(AppContext* context) { // Renamed function
     if (!sd_ready) return false;
+    
+    if (!sd_has_working_heap(32768)) {
+        Serial.println("[PCAP] open skipped: low internal heap");
+        return false;
+    }
+
     char fn[32];
     sprintf(fn, "/cap_%lu.pcap", millis());
     context->sniffer.pcap_file = SD_MMC.open(fn, FILE_WRITE);
-    if (context->sniffer.pcap_file) {
-        pcap_global_header gh = {0xa1b2c3d4, 2, 4, 0, 0, 65535, 105};
-        context->sniffer.pcap_file.write((uint8_t*)&gh, sizeof(gh));
-        context->sniffer.pcap_file.flush();
-        return true;
+    
+    if (!context->sniffer.pcap_file) {
+        Serial.println("[PCAP] open failed");
+        return false;
     }
-    return false;
+    
+    pcap_global_header gh = {0xa1b2c3d4, 2, 4, 0, 0, 65535, 105};
+    size_t w = context->sniffer.pcap_file.write((uint8_t*)&gh, sizeof(gh));
+    if (w != sizeof(gh)) {
+        Serial.println("[PCAP] header write failed");
+        context->sniffer.pcap_file.close();
+        context->sniffer.pcap_file = File();
+        return false;
+    }
+    context->sniffer.pcap_file.flush();
+    return true;
 }
 
-void sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // Renamed function
-    if (context->sniffer.pcap_file) {
-        pcap_packet_header h;
-        h.ts_sec = record->ts_sec;
-        h.ts_usec = record->ts_usec;
-        h.incl_len = record->len;
-        h.orig_len = record->len;
-        context->sniffer.pcap_file.write((uint8_t*)&h, sizeof(h));
-        context->sniffer.pcap_file.write(record->payload, record->len);
+bool sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // Renamed function
+    if (!context || !context->sniffer.pcap_file) return false;
+
+    if (!sd_has_working_heap(24576)) {
+        Serial.println("[PCAP] write skipped: low internal heap");
+        return false;
     }
+
+    pcap_packet_header h;
+    h.ts_sec = record->ts_sec;
+    h.ts_usec = record->ts_usec;
+    h.incl_len = record->len;
+    h.orig_len = record->len;
+    size_t w1 = context->sniffer.pcap_file.write((uint8_t*)&h, sizeof(h));
+    size_t w2 = context->sniffer.pcap_file.write(record->payload, record->len);
+    
+    if (w1 != sizeof(h) || w2 != record->len) {
+        Serial.println("[PCAP] WRITE FAILED");
+        context->sniffer.pcap_file.flush();
+        context->sniffer.pcap_file.close();
+        context->sniffer.pcap_file = File(); // 🔴 REQUIRED: Nullify dangling handle
+        return false;
+    }
+    return true;
 }
 
 void sd_logger_pcap_file_close(AppContext* context) { // Renamed function
     if (context->sniffer.pcap_file) {
         context->sniffer.pcap_file.flush();
         context->sniffer.pcap_file.close();
+        context->sniffer.pcap_file = File(); // 🔴 REQUIRED: Nullify dangling handle
     }
 }

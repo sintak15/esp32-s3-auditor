@@ -12,5 +12,5 @@ void sd_log_probe(const char* ssid);
 
 // Functions to manage PCAP file
 bool sd_logger_pcap_file_open(AppContext* context);
-void sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record);
+bool sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record);
 void sd_logger_pcap_file_close(AppContext* context);
