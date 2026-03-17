@@ -34,7 +34,9 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
         rec.ts_usec = us % 1000000;
         rec.len = len;
         memcpy(rec.payload, frame, len);
-        xQueueSendFromISR(sniffer.pcap_queue, &rec, NULL);
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xQueueSendFromISR(sniffer.pcap_queue, &rec, &xHigherPriorityTaskWoken);
+        if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
     }
 
     if (sniffer.probe_active && type == WIFI_PKT_MGMT && frame[0] == 0x40) {
@@ -45,7 +47,9 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
                 ProbeSsid probe_data;
                 memcpy(probe_data.data, &frame[26], sl);
                 probe_data.data[sl] = '\0'; // Ensure null termination
-                xQueueSendFromISR(sniffer.probe_queue, &probe_data, NULL);
+                BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+                xQueueSendFromISR(sniffer.probe_queue, &probe_data, &xHigherPriorityTaskWoken);
+                if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
             }
         }
     }
@@ -58,7 +62,10 @@ void process_pcap_queue(AppContext* context) {
     while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0) == pdTRUE) { // Pass address
         sd_logger_pcap_file_write(context, &rec); // Corrected function call
         context->sniffer.pcap_packet_count++;
-        if (++writes >= 50) break; // Don't block the main loop for too long
+        
+        // Yield briefly every 8 writes so the watchdog doesn't starve if the SD card lags
+        if ((++writes & 7) == 0) vTaskDelay(1); 
+        if (writes >= 25) break; // Reduced from 50 to 25 to keep the UI buttery smooth
     }
 }
 
@@ -69,6 +76,12 @@ void process_probe_queue(AppContext* context) {
     while (xQueueReceive(context->sniffer.probe_queue, &received_probe_ssid, 0) == pdTRUE) { // Pass address
         if (strlen(received_probe_ssid.data) > 0 && context->sniffer.unique_probes.find(received_probe_ssid) == context->sniffer.unique_probes.end()) {
             if (context->sniffer.unique_probes.size() > MAX_LIST_MEMORY) {
+                lv_indev_t * indev = lv_indev_get_next(NULL);
+                if (indev && indev->proc.state == LV_INDEV_STATE_PR) {
+                    // Defer clearing the list to prevent LVGL crash while user is touching the screen
+                    xQueueSendToFront(context->sniffer.probe_queue, &received_probe_ssid, 0);
+                    break;
+                }
                 context->sniffer.unique_probes.clear();
                 if (probe_list) lv_obj_clean(probe_list); // Guard against probe_list not being initialized
             }
@@ -78,7 +91,10 @@ void process_probe_queue(AppContext* context) {
                 sd_log_probe(received_probe_ssid.data);
             }
         }
-        if (++processed >= 50) break; // Prevent stalling the main UI loop under heavy traffic
+        
+        // Yield briefly every 8 writes so the watchdog doesn't starve
+        if ((++processed & 7) == 0) vTaskDelay(1);
+        if (processed >= 25) break; // Reduced from 50 to 25 to keep the UI buttery smooth
     }
 }
 

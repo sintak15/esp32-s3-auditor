@@ -11,6 +11,8 @@ extern lv_obj_t *scan_list;
 extern lv_obj_t *lbl_scan_count;
 extern void cb_net_selected(lv_event_t* e);
 
+static bool deferred_render = false;
+
 void wifi_scanner_init(AppContext *ctx) {
     context = ctx;
     if (context && !context->wifi_scan.mutex) {
@@ -46,6 +48,13 @@ void run_ap_scan(AppContext *ctx) {
 
 void render_scan_list(AppContext *ctx) {
     if (!ctx || !scan_list || !lbl_scan_count) return;
+
+    lv_indev_t * indev = lv_indev_get_next(NULL);
+    if (indev && indev->proc.state == LV_INDEV_STATE_PR) {
+        deferred_render = true;
+        return;
+    }
+    deferred_render = false;
 
     lv_obj_clean(scan_list);
     char buf[128];
@@ -146,6 +155,13 @@ void mac_str(const uint8_t *mac, char *out) {
 void scan_tick(lv_timer_t *timer) {
     AppContext *ctx = (AppContext *)timer->user_data;
     if (!ctx || ctx->wifi_scan.paused) return;
+
+    if (deferred_render) {
+        lv_indev_t * indev = lv_indev_get_next(NULL);
+        if (!indev || indev->proc.state == LV_INDEV_STATE_REL) {
+            render_scan_list(ctx);
+        }
+    }
 
     // Check if scan is complete
     int16_t n = WiFi.scanComplete();

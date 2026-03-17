@@ -213,15 +213,17 @@ void ui_update_tick(lv_timer_t *timer) {
         if (nodedb_list && lora_nodedb_panel && !lv_obj_has_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN)) {
             if (ui_context->lora.nodedb_updated) {
                 static uint32_t last_nodedb_draw = 0;
-                if (millis() - last_nodedb_draw > 2000) { // Limit destructive UI rebuilds to every 2 seconds
+                
+                lv_indev_t * indev = lv_indev_get_next(NULL);
+                bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR);
+                
+                if (!is_touched && (millis() - last_nodedb_draw > 2000)) { // Limit destructive UI rebuilds
                     lv_obj_clean(nodedb_list);
                     for (const auto& n : ui_context->lora.known_nodes) {
                         char buf[128];
                         uint32_t age = (millis() - n.last_heard) / 1000;
-                        char safe_long_name[sizeof(n.long_name) + 1];
-                        snprintf(safe_long_name, sizeof(safe_long_name), "%.*s", sizeof(n.long_name), n.long_name);
                         snprintf(buf, sizeof(buf), "%s\n!%08lx  %lus ago  SNR: %.1f",
-                            safe_long_name[0] != '\0' ? safe_long_name : "Unknown",
+                            (n.long_name[0] != '\0') ? n.long_name : "Unknown",
                             (unsigned long)n.num, (unsigned long)age, n.snr);
                         lv_list_add_text(nodedb_list, buf);
                     }
