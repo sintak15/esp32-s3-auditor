@@ -90,9 +90,9 @@ struct BLERing {
 
 // Define ScanState
 struct ScanState {
-  APRecord ap_list[MAX_APS];
+  APRecord* ap_list;
   int ap_count;
-  StaRecord sta_list[MAX_STAS];
+  StaRecord* sta_list;
   int sta_count;
   ScanView view;
   bool paused;
@@ -178,8 +178,8 @@ struct NodeRecord {
 struct LoraState {
   SemaphoreHandle_t mutex;
   TaskHandle_t service_task;
-  char log_data[2048]; // Buffer for incoming LoRa data
-  char chat_data[2048]; // Buffer for LoRa chat
+  char* log_data; // Buffer for incoming LoRa data (allocated in PSRAM)
+  char* chat_data; // Buffer for LoRa chat (allocated in PSRAM)
   bool log_updated;
   bool chat_updated;
   bool nodedb_updated;

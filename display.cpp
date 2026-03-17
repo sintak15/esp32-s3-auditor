@@ -183,14 +183,19 @@ void ui_update_tick(lv_timer_t *timer) {
     // ISOLATION TEST A: Uncomment to completely disable UI tick updates
     // return;
 
+    // CRITICAL: Prevent crash if timer fires during teardown or before init
+    if (!timer || !ui_context) return;
+
     uint32_t t0 = millis();
     uint32_t t_stage;
     
-    if (!ui_context) return;
     // Guard against timer firing before ui_build() has finished assigning all objects
     if (!lbl_batt || !lbl_batt_pct || !lbl_sd || !lbl_wifi || !lbl_msg || !tabview ||
         !ta_lora_log || !lora_log_panel || !ta_lora_chat || !lora_chat_panel ||
-        !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel) return;
+        !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel) {
+        Serial.println("[UI] Skipping update - objects not ready");
+        return;
+    }
 
     t_stage = millis();
     static int last_batteryPct = -1;
@@ -247,17 +252,29 @@ void ui_update_tick(lv_timer_t *timer) {
         if (ta_lora_log && lora_log_panel && !lv_obj_has_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN)) {
             static uint32_t last_log_draw = 0;
             static uint32_t last_log_hash = 0;
-            uint32_t current_hash = strlen(ui_context->lora.log_data); // Simple hash
-            if (current_hash != last_log_hash && millis() - last_log_draw > 500) { // 500ms throttle
-                ui_context->lora.log_data[sizeof(ui_context->lora.log_data) - 1] = '\0';
-                if (strlen(ui_context->lora.log_data) > 1900) { strcpy(ui_context->lora.log_data, "--- Buffer Cleared ---\n"); }
-                lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data);
+            
+            // Ensure buffer is null-terminated BEFORE strlen() to prevent crashes
+            ui_context->lora.log_data[2048 - 1] = '\0';
+            size_t log_len = strlen(ui_context->lora.log_data);
+            
+            if (log_len != last_log_hash && millis() - last_log_draw > 500) { // 500ms throttle
+                if (log_len > 1900) { 
+                    strcpy(ui_context->lora.log_data, "--- Buffer Cleared ---\n"); 
+                    log_len = strlen(ui_context->lora.log_data);
+                }
+                
+                // Create a safe copy to prevent race conditions during UI update
+                static char log_copy[2048];
+                strncpy(log_copy, ui_context->lora.log_data, sizeof(log_copy) - 1);
+                log_copy[sizeof(log_copy) - 1] = '\0';
+                
+                lv_textarea_set_text(ta_lora_log, log_copy);
                 lv_indev_t * indev = lv_indev_get_next(NULL);
                 if (!((indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(ta_lora_log))) {
                     lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF);
                 }
                 ui_context->lora.log_updated = false;
-                last_log_hash = current_hash;
+                last_log_hash = log_len;
                 last_log_draw = millis();
             }
         }
@@ -266,9 +283,19 @@ void ui_update_tick(lv_timer_t *timer) {
         if (ta_lora_chat && lora_chat_panel && !lv_obj_has_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN)) {
             static uint32_t last_chat_draw = 0;
             if (ui_context->lora.chat_updated && millis() - last_chat_draw > 250) {
-                ui_context->lora.chat_data[sizeof(ui_context->lora.chat_data) - 1] = '\0';
-                if (strlen(ui_context->lora.chat_data) > 1900) { strcpy(ui_context->lora.chat_data, "--- Buffer Cleared ---\n"); }
-                lv_textarea_set_text(ta_lora_chat, ui_context->lora.chat_data);
+                ui_context->lora.chat_data[2048 - 1] = '\0';
+                size_t chat_len = strlen(ui_context->lora.chat_data);
+                
+                if (chat_len > 1900) { 
+                    strcpy(ui_context->lora.chat_data, "--- Buffer Cleared ---\n"); 
+                    chat_len = strlen(ui_context->lora.chat_data);
+                }
+                
+                static char chat_copy[2048];
+                strncpy(chat_copy, ui_context->lora.chat_data, sizeof(chat_copy) - 1);
+                chat_copy[sizeof(chat_copy) - 1] = '\0';
+                
+                lv_textarea_set_text(ta_lora_chat, chat_copy);
                 lv_indev_t * indev = lv_indev_get_next(NULL);
                 if (!((indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(ta_lora_chat))) {
                     lv_obj_scroll_to_y(ta_lora_chat, LV_COORD_MAX, LV_ANIM_OFF);
@@ -332,6 +359,7 @@ void ui_update_tick(lv_timer_t *timer) {
                             len += written;
                         }
                     }
+                    ndb_buf[2047] = '\0'; // Safety termination
                     lv_textarea_set_text(nodedb_list, ndb_buf);
                     ui_context->lora.nodedb_updated = false;
                     last_nodedb_draw = millis();
