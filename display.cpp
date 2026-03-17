@@ -148,12 +148,12 @@ void display_init() {
     // With OPI PSRAM, the performance penalty is minimal (~5ms extra flush time), but we gain
     // ~13KB of internal RAM which prevents heap exhaustion crashes.
     uint32_t buf_pixels = SCREEN_W * 20; 
-    lvgl_buf1 = (lv_color_t *)heap_caps_malloc(buf_pixels * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    lvgl_buf1 = (lv_color_t *)ps_malloc(buf_pixels * sizeof(lv_color_t));
     if (!lvgl_buf1) {
-        Serial.println("[FATAL] PSRAM alloc failed - check PSRAM is enabled in Arduino IDE");
-        while(1) delay(100);
+        Serial.println("[FATAL] PSRAM alloc failed - cannot continue");
+        while(1) delay(1000);
     }
-    Serial.printf("[UI] LVGL buffer allocated in PSRAM: %u bytes\n", buf_pixels * sizeof(lv_color_t));
+    Serial.printf("[UI] Allocated %u bytes in PSRAM for LVGL buffer\n", buf_pixels * sizeof(lv_color_t));
 
     lv_disp_draw_buf_init(&draw_buf, lvgl_buf1, nullptr, buf_pixels);
     lv_disp_drv_init(&disp_drv);
@@ -246,7 +246,9 @@ void ui_update_tick(lv_timer_t *timer) {
         // Update LoRa log in terminal
         if (ta_lora_log && lora_log_panel && !lv_obj_has_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN)) {
             static uint32_t last_log_draw = 0;
-            if (ui_context->lora.log_updated && millis() - last_log_draw > 250) {
+            static uint32_t last_log_hash = 0;
+            uint32_t current_hash = strlen(ui_context->lora.log_data); // Simple hash
+            if (current_hash != last_log_hash && millis() - last_log_draw > 500) { // 500ms throttle
                 ui_context->lora.log_data[sizeof(ui_context->lora.log_data) - 1] = '\0';
                 if (strlen(ui_context->lora.log_data) > 1900) { strcpy(ui_context->lora.log_data, "--- Buffer Cleared ---\n"); }
                 lv_textarea_set_text(ta_lora_log, ui_context->lora.log_data);
@@ -255,6 +257,7 @@ void ui_update_tick(lv_timer_t *timer) {
                     lv_obj_scroll_to_y(ta_lora_log, LV_COORD_MAX, LV_ANIM_OFF);
                 }
                 ui_context->lora.log_updated = false;
+                last_log_hash = current_hash;
                 last_log_draw = millis();
             }
         }
@@ -312,17 +315,21 @@ void ui_update_tick(lv_timer_t *timer) {
                 lv_indev_t * indev = lv_indev_get_next(NULL);
                 bool is_touched = (indev && indev->proc.state == LV_INDEV_STATE_PR) || lv_obj_is_scrolling(nodedb_list);
                 
-                if (!is_touched && (millis() - last_nodedb_draw > 2000)) { // Limit destructive UI rebuilds
-                    static char ndb_buf[2048];
+                static char* ndb_buf = nullptr;
+                if (!ndb_buf) ndb_buf = (char*)ps_malloc(2048); // Allocate once in PSRAM
+                
+                if (!is_touched && (millis() - last_nodedb_draw > 5000)) { // Increase to 5 seconds
                     ndb_buf[0] = '\0';
+                    size_t len = 0;
                     for (const auto& n : ui_context->lora.known_nodes) {
+                        if (len > 1800) break; // Safety limit
                         char buf[128];
-                        uint32_t age = (millis() - n.last_heard) / 1000;
-                        snprintf(buf, sizeof(buf), "%s\n!%08lx  %lus ago  SNR: %.1f\n\n",
+                        int written = snprintf(buf, sizeof(buf), "%s\n!%08lx  %lus ago  SNR: %.1f\n\n",
                             (n.long_name[0] != '\0') ? n.long_name : "Unknown",
-                            (unsigned long)n.num, (unsigned long)age, n.snr);
-                        if (strlen(ndb_buf) + strlen(buf) < sizeof(ndb_buf) - 1) {
+                            (unsigned long)n.num, (unsigned long)((millis() - n.last_heard) / 1000), n.snr);
+                        if (len + written < 2000) {
                             strcat(ndb_buf, buf);
+                            len += written;
                         }
                     }
                     lv_textarea_set_text(nodedb_list, ndb_buf);

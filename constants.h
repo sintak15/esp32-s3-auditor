@@ -33,16 +33,16 @@
 
 // PCAP Sniffer
 #define MAX_PCAP_PACKET_SIZE 256 // Max size of 802.11 frame to capture
-#define PCAP_QUEUE_SIZE 100 // Number of packets in the ring buffer
+#define PCAP_QUEUE_SIZE 50 // Number of packets in the ring buffer
 #define CHANNEL_HOP_INTERVAL_MS 100 // Time to stay on a channel during sniffing
 
 // Probe Sniffer
 #define PROBE_MAX_SSID_LEN 32
-#define PROBE_QUEUE_SIZE 50
+#define PROBE_QUEUE_SIZE 25
 #define MAX_LIST_MEMORY 100 // Max items in UI list before clearing
 
 // BLE
-#define BLE_RING_SIZE 10 // Size of BLE ring buffer for UI display
+#define BLE_RING_SIZE 5 // Size of BLE ring buffer for UI display
 
 // NVS (Non-Volatile Storage)
 #define NVS_NAMESPACE "pentester"
