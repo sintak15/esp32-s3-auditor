@@ -218,7 +218,7 @@ void ui_update_tick(lv_timer_t *timer) {
                     uint32_t age = (millis() - n.last_heard) / 1000;
                     char safe_long_name[sizeof(n.long_name) + 1];
                     snprintf(safe_long_name, sizeof(safe_long_name), "%.*s", sizeof(n.long_name), n.long_name);
-                    snprintf(buf, sizeof(buf), "%s\n!%08lx  %lus ago  SNR: %d",
+                    snprintf(buf, sizeof(buf), "%s\n!%08lx  %lus ago  SNR: %.1f",
                         safe_long_name[0] != '\0' ? safe_long_name : "Unknown",
                         (unsigned long)n.num, (unsigned long)age, n.snr);
                     lv_list_add_text(nodedb_list, buf);

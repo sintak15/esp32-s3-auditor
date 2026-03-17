@@ -170,7 +170,7 @@ struct NodeRecord {
   uint32_t num;
   char long_name[40];
   uint32_t last_heard;
-  int8_t snr;
+  float snr;
 };
 
 // Define LoRa/Serial State
