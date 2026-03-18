@@ -385,11 +385,15 @@ void status_service_task(void *pv) {
     static float filtered_mv = 0.0f;
     const float alpha = 0.15f; // Smoothing factor (0.0 to 1.0). Lower is smoother.
 
+    // Configure ADC attenuation for the full 0-3.1V range
+    // On S3-CYD models, the battery pin is GPIO 1 (GPIO 4 is LCD_DC)
+    analogSetAttenuation(ADC_11db);
+
     for (;;) {
         // Use factory-calibrated millivolts reading with multi-sampling pre-filter
         uint32_t raw_sum = 0;
         for(int i=0; i<10; i++) raw_sum += analogReadMilliVolts(BATT_ADC);
-        uint32_t raw_mv = (raw_sum / 10) * 2; // ADC is on a 1:2 divider
+        uint32_t raw_mv = (raw_sum / 10) * 2; // Standard 1:2 divider calculation
 
         // Exponential Moving Average (EMA) low-pass filter to prevent flickering
         if (filtered_mv == 0.0f) {
@@ -399,8 +403,14 @@ void status_service_task(void *pv) {
         }
 
         uint32_t mv = (uint32_t)filtered_mv;
-        int newBattPct = MeshUtils::mvoltsToPct(mv);
-        bool charging = MeshUtils::isHardwareCharging(mv);
+        
+        // Calculate percentage locally with strict clamping to 0-100
+        // Li-ion: 3200mV (Empty/Shutdown) to 4180mV (Full)
+        int newBattPct = map(constrain(mv, 3200, 4180), 3200, 4180, 0, 100);
+        
+        // Heuristic: If reading is above 4250mV on a 1S battery, it's physically 
+        // impossible unless a charger is applying 5V to the rail.
+        bool charging = (mv > 4250); 
 
         if (!sd_card_ready() && millis() - sd_retry_ms > 5000) {
             if (!g_app_context.sniffer.pcap_active && 

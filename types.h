@@ -58,7 +58,7 @@ struct pcap_packet_header {
 
 enum ScanView { VIEW_AP, VIEW_STA, VIEW_LINKED };
 
-enum PentestMode { PT_NONE, PT_DEAUTH, PT_BEACON, PT_PMKID };
+enum AuditMode { AUDIT_NONE, AUDIT_DEAUTH, AUDIT_BEACON, AUDIT_PMKID };
 
 // Custom struct for MAC addresses to avoid String overhead in std::set
 struct MacAddress {
@@ -83,6 +83,7 @@ struct StatusSnapshot {
   bool sdMounted;
   int  batteryPct;
   bool isCharging;
+  uint32_t batteryMv;
 };
 
 struct BLERing {

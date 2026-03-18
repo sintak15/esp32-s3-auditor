@@ -23,7 +23,7 @@
 #define GPS_TX_PIN 44
 #define LORA_RX_PIN 14 // Unencumbered GPIO for Heltec
 #define LORA_TX_PIN 21 // Unencumbered GPIO for Heltec
-#define BATT_ADC 1 // ADC pin for battery voltage reading
+#define BATT_ADC 9 // Verified via ADC scanner (2100mV * 2 = 4.2V)
 
 // WiFi Scanner
 #define MAX_APS 64
