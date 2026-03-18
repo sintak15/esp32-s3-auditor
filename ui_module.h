@@ -24,6 +24,7 @@ extern lv_obj_t *about_panel;
 extern lv_obj_t *lbl_firmware_version;
 extern lv_obj_t *lbl_build_date;
 extern lv_obj_t *lbl_device_id;
+extern lv_obj_t *lbl_current_sha256;
 extern lv_obj_t *lbl_ota_status;
 extern lv_obj_t *lbl_ota_progress;
 extern lv_obj_t *btn_ble_flood;

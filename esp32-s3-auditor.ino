@@ -9,6 +9,7 @@
 #include <esp_task_wdt.h>
 #include <lvgl.h>
 #include <WiFi.h>
+#include <mbedtls/sha256.h> // For SHA256 hash calculation
 #include <esp_wifi.h>
 #include <WebServer.h>
 #include <HTTPClient.h> // For OTA
@@ -64,6 +65,7 @@ extern lv_obj_t *btn_stop_audit;
 extern lv_obj_t *lbl_firmware_version;
 extern lv_obj_t *lbl_build_date;
 extern lv_obj_t *lbl_device_id;
+extern lv_obj_t *lbl_current_sha256;
 extern lv_obj_t *lbl_ota_status;
 extern lv_obj_t *lbl_ota_progress;
 extern lv_obj_t *tabview;
@@ -392,6 +394,18 @@ void reset_battery_calibration() {
     g_app_context.status.calibrated_max_mv = 4050; // Reset to safe default
 }
 
+static String get_sha256_from_url(const char* url) {
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+        String hash = http.getString();
+        hash.trim();
+        return hash;
+    }
+    return "";
+}
+
 void ota_task(void *pvParameters) {
     g_app_context.ota_active = true;
     strlcpy(g_app_context.ota_status_message, "Connecting to WiFi...", sizeof(g_app_context.ota_status_message));
@@ -422,10 +436,20 @@ void ota_task(void *pvParameters) {
     HTTPClient http;
     http.begin(FIRMWARE_VERSION_URL);
     int httpCode = http.GET();
+    http.end(); // Close connection for version check
 
     if (httpCode == HTTP_CODE_OK) {
         String newVersionStr = http.getString();
         newVersionStr.trim();
+
+        String expectedSha256 = get_sha256_from_url(FIRMWARE_SHA256_URL);
+        if (expectedSha256.isEmpty()) {
+            strlcpy(g_app_context.ota_status_message, "Failed to get expected SHA256!", sizeof(g_app_context.ota_status_message));
+            g_app_context.ota_active = false;
+            vTaskDelete(NULL);
+            return;
+        }
+
         Serial.printf("[OTA] Latest version: %s, Current: %s\n", newVersionStr.c_str(), FIRMWARE_VERSION);
 
         if (newVersionStr.equals(FIRMWARE_VERSION)) {
@@ -448,14 +472,49 @@ void ota_task(void *pvParameters) {
         if (httpCode == HTTP_CODE_OK) {
             int contentLength = http.getSize();
             bool canBegin = Update.begin(contentLength);
-
+            
             if (canBegin) {
                 WiFiClient& client = http.getStream();
-                size_t written = Update.write(client);
 
-                if (written == contentLength) {
-                    strlcpy(g_app_context.ota_status_message, "Download complete. Updating...", sizeof(g_app_context.ota_status_message));
-                    g_app_context.ota_progress_pct = 90;
+                mbedtls_sha256_context sha256_ctx;
+                mbedtls_sha256_init(&sha256_ctx);
+                mbedtls_sha256_starts_ret(&sha256_ctx, 0); // 0 for SHA256
+
+                uint8_t buf[1024]; // Buffer for reading chunks
+                size_t total_read = 0;
+                int current_progress = 0;
+
+                while (client.connected() && (contentLength > 0 || contentLength == -1)) {
+                    size_t len = client.readBytes(buf, std::min((size_t)contentLength, sizeof(buf)));
+                    if (len == 0) break; // No more data
+
+                    mbedtls_sha256_update_ret(&sha256_ctx, buf, len);
+                    Update.write(buf, len);
+                    total_read += len;
+
+                    if (contentLength != -1) contentLength -= len;
+                    
+                    int new_progress = (total_read * 100) / http.getSize();
+                    if (new_progress > current_progress) {
+                        current_progress = new_progress;
+                        g_app_context.ota_progress_pct = new_progress;
+                        snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Downloading... %d%%", new_progress);
+                    }
+                }
+
+                unsigned char calculated_hash[32];
+                mbedtls_sha256_finish_ret(&sha256_ctx, calculated_hash);
+                mbedtls_sha256_free(&sha256_ctx);
+
+                char calculated_hash_str[65];
+                for (int i = 0; i < 32; i++) {
+                    sprintf(&calculated_hash_str[i * 2], "%02x", calculated_hash[i]);
+                }
+                calculated_hash_str[64] = '\0';
+
+                if (String(calculated_hash_str).equalsIgnoreCase(expectedSha256)) {
+                    strlcpy(g_app_context.ota_status_message, "Download complete. Verifying & Updating...", sizeof(g_app_context.ota_status_message));
+                    g_app_context.ota_progress_pct = 95;
                     vTaskDelay(pdMS_TO_TICKS(1000));
 
                     if (Update.end()) {
@@ -466,12 +525,15 @@ void ota_task(void *pvParameters) {
                             ESP.restart();
                         } else {
                             strlcpy(g_app_context.ota_status_message, "Update not committed!", sizeof(g_app_context.ota_status_message));
+                            Update.abort();
                         }
                     } else {
                         snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Update failed! Error: %d", Update.getError());
+                        Update.abort();
                     }
                 } else {
-                    snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Download failed! Written: %zu/%d", written, contentLength);
+                    strlcpy(g_app_context.ota_status_message, "Hash mismatch! Aborting.", sizeof(g_app_context.ota_status_message));
+                    Update.abort();
                 }
             } else {
                 strlcpy(g_app_context.ota_status_message, "Not enough space for OTA!", sizeof(g_app_context.ota_status_message));
@@ -1333,6 +1395,20 @@ void wifi_worker_task(void *pvParameters) {
     }
 }
 
+static void calculate_current_firmware_sha256() {
+    mbedtls_sha256_context sha256_ctx;
+    mbedtls_sha256_init(&sha256_ctx);
+    mbedtls_sha256_starts_ret(&sha256_ctx, 0);
+
+    const esp_app_desc_t *app_desc = esp_ota_get_app_description();
+    mbedtls_sha256_update_ret(&sha256_ctx, (const unsigned char*)app_desc->app_elf_sha256, sizeof(app_desc->app_elf_sha256));
+
+    unsigned char hash[32];
+    mbedtls_sha256_finish_ret(&sha256_ctx, hash);
+    for (int i = 0; i < 32; i++) sprintf(&g_app_context.current_firmware_sha256[i * 2], "%02x", hash[i]);
+    g_app_context.current_firmware_sha256[64] = '\0';
+}
+
 void setup() {
     Serial.begin(115200);
     SerialLoRa.setRxBufferSize(4096); // INCREASE RX BUFFER to prevent interrupt storms during NodeDB bursts
@@ -1458,6 +1534,8 @@ void setup() {
 
     // Wake up the connected LoRa node
     wake_meshtastic_node();
+
+    calculate_current_firmware_sha256();
 
     Serial.println("ESP32-S3 Auditor ready (Build: Arduino IDE).");
     

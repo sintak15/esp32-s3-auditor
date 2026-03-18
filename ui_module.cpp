@@ -56,6 +56,7 @@ lv_obj_t *about_panel = nullptr;
 lv_obj_t *lbl_firmware_version = nullptr;
 lv_obj_t *lbl_build_date = nullptr;
 lv_obj_t *lbl_device_id = nullptr;
+lv_obj_t *lbl_current_sha256 = nullptr;
 lv_obj_t *lbl_ota_status = nullptr;
 lv_obj_t *lbl_ota_progress = nullptr;
 
@@ -642,6 +643,10 @@ void ui_build() {
   lbl_device_id = lv_label_create(about_panel);
   lv_label_set_text(lbl_device_id, "Platform: Arduino IDE");
   lv_obj_align(lbl_device_id, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 80);
+
+  lbl_current_sha256 = lv_label_create(about_panel);
+  lv_label_set_text(lbl_current_sha256, "SHA256: Calculating...");
+  lv_obj_align(lbl_current_sha256, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 100);
 
   lv_obj_t *btn_update_firmware = lv_btn_create(about_panel);
   lv_obj_set_size(btn_update_firmware, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
