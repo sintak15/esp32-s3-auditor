@@ -42,7 +42,7 @@
 #define MAX_LIST_MEMORY 100 // Max items in UI list before clearing
 
 // BLE
-#define BLE_RING_SIZE 5 // Size of BLE ring buffer for UI display
+#define BLE_RING_SIZE 32 // Size of BLE ring buffer for UI display (expanded for larger bursts)
 
 // NVS (Non-Volatile Storage)
 #define NVS_NAMESPACE "pentester"
