@@ -166,49 +166,44 @@ PerfTracker perf_lora;
 PerfTracker perf_web;
 
 void get_perf_stats(char* buf, size_t max_len) {
-    uint32_t ui_avg = perf_ui_timer.call_count ? perf_ui_timer.total_time / perf_ui_timer.call_count : 0;
-    uint32_t ui_max = perf_ui_timer.max_time == 0xFFFFFFFF ? 0 : perf_ui_timer.max_time;
-    uint32_t ui_q_avg = perf_ui_queue.call_count ? perf_ui_queue.total_time / perf_ui_queue.call_count : 0;
-    uint32_t ble_ui_avg = perf_ble_ui.call_count ? perf_ble_ui.total_time / perf_ble_ui.call_count : 0;
-    uint32_t pcap_avg = perf_pcap.call_count ? perf_pcap.total_time / perf_pcap.call_count : 0;
-    uint32_t probe_avg = perf_probe.call_count ? perf_probe.total_time / perf_probe.call_count : 0;
-    uint32_t chan_avg = perf_chan_hop.call_count ? perf_chan_hop.total_time / perf_chan_hop.call_count : 0;
-    uint32_t lora_avg = perf_lora.call_count ? perf_lora.total_time / perf_lora.call_count : 0;
-    uint32_t web_avg = perf_web.call_count ? perf_web.total_time / perf_web.call_count : 0;
+    uint32_t totalTime;
+    UBaseType_t taskCount = uxTaskGetNumberOfTasks();
+    TaskStatus_t *taskArray = (TaskStatus_t *)pvPortMalloc(taskCount * sizeof(TaskStatus_t));
+    
+    String out = "--- OS TASK MONITOR ---\n";
+    out += "Task Name      CPU%  Stack\n";
 
-    // Core 1 (UI) runs on a 10ms yield
-    uint32_t ui_load_pct = (ui_avg * 100) / (ui_avg + 10);
-    uint32_t ui_fps = 1000 / (ui_avg + 10);
+    if (taskArray != nullptr) {
+        taskCount = uxTaskGetSystemState(taskArray, taskCount, &totalTime);
+        if (totalTime > 0) {
+            for (UBaseType_t i = 0; i < taskCount; i++) {
+                // Only show tasks consuming > 0.1% or our critical suite tasks
+                int pct = (taskArray[i].ulRunTimeCounter * 100) / totalTime;
+                if (pct > 0 || strstr(taskArray[i].pcTaskName, "lora") || strstr(taskArray[i].pcTaskName, "wifi")) {
+                    char line[64];
+                    snprintf(line, sizeof(line), "%-14s %-3d%%  %u\n", 
+                             taskArray[i].pcTaskName, pct, taskArray[i].usStackHighWaterMark);
+                    out += line;
+                }
+            }
+        }
+        vPortFree(taskArray);
+    }
 
-    // Core 0 (WiFi Worker) runs on a 10ms yield after its stages
-    uint32_t wifi_active = pcap_avg + probe_avg + chan_avg;
-    uint32_t wifi_load_pct = (wifi_active * 100) / (wifi_active + 10);
+    out += "\n--- STAGE TIMINGS (ms) ---\n";
+    auto add_p = [&](const char* n, PerfTracker& p) {
+        char l[64];
+        uint32_t avg = p.call_count ? p.total_time / p.call_count : 0;
+        snprintf(l, sizeof(l), "%-12s Avg:%-2lu Max:%-2lu\n", n, avg, (p.max_time == 0xFFFFFFFF ? 0 : p.max_time));
+        out += l;
+    };
 
-    snprintf(buf, max_len,
-        "--- EXECUTION TIMES (ms) ---\n"
-        "Task         Avg   Max\n"
-        "UI Timer:    %-4lu  %-4lu\n"
-        "UI Queue:    %-4lu  %-4lu\n"
-        "BLE UI:      %-4lu  %-4lu\n"
-        "PCAP:        %-4lu  %-4lu\n"
-        "Probe:       %-4lu  %-4lu\n"
-        "Chan Hop:    %-4lu  %-4lu\n"
-        "LoRa:        %-4lu  %-4lu\n"
-        "Web:         %-4lu  %-4lu\n\n"
-        "--- ESTIMATED CPU LOAD ---\n"
-        "UI (Core 1): %lu%% (~%lu FPS)\n"
-        "WiFi Worker: %lu%%",
-        ui_avg, ui_max,
-        ui_q_avg, perf_ui_queue.max_time == 0xFFFFFFFF ? 0 : perf_ui_queue.max_time,
-        ble_ui_avg, perf_ble_ui.max_time == 0xFFFFFFFF ? 0 : perf_ble_ui.max_time,
-        pcap_avg, perf_pcap.max_time == 0xFFFFFFFF ? 0 : perf_pcap.max_time,
-        probe_avg, perf_probe.max_time == 0xFFFFFFFF ? 0 : perf_probe.max_time,
-        chan_avg, perf_chan_hop.max_time == 0xFFFFFFFF ? 0 : perf_chan_hop.max_time,
-        lora_avg, perf_lora.max_time == 0xFFFFFFFF ? 0 : perf_lora.max_time,
-        web_avg, perf_web.max_time == 0xFFFFFFFF ? 0 : perf_web.max_time,
-        ui_load_pct, ui_fps,
-        wifi_load_pct
-    );
+    add_p("UI Timer", perf_ui_timer);
+    add_p("WiFi Work", perf_pcap);
+    add_p("LoRa RX", perf_lora);
+    add_p("Web Serv", perf_web);
+
+    strlcpy(buf, out.c_str(), max_len);
 }
 
 // ──────────────────────────────────────────────
@@ -383,7 +378,7 @@ static void write_status_snapshot(bool sdMounted, int batteryPct, bool isChargin
 void status_service_task(void *pv) {
     uint32_t sd_retry_ms = 0;
     static float filtered_mv = 0.0f;
-    const float alpha = 0.15f; // Smoothing factor (0.0 to 1.0). Lower is smoother.
+    const float alpha = 0.10f; // Increased damping for more stable percentage
 
     // Configure ADC attenuation for the full 0-3.1V range
     // On S3-CYD models, the battery pin is GPIO 1 (GPIO 4 is LCD_DC)
@@ -396,8 +391,9 @@ void status_service_task(void *pv) {
         uint32_t raw_mv = (raw_sum / 10) * 2; // Standard 1:2 divider calculation
 
         // Exponential Moving Average (EMA) low-pass filter to prevent flickering
-        // Fast-track: if the change is > 80mV, assume plug/unplug and skip filtering
-        if (filtered_mv == 0.0f || abs((int32_t)raw_mv - (int32_t)filtered_mv) > 80) {
+        // Increased threshold to 130mV to allow natural voltage relaxation (sag) 
+        // when unplugging to be smoothed by the filter instead of jumping instantly.
+        if (filtered_mv == 0.0f || abs((int32_t)raw_mv - (int32_t)filtered_mv) > 130) {
             filtered_mv = (float)raw_mv; 
         } else {
             filtered_mv = (alpha * (float)raw_mv) + ((1.0f - alpha) * filtered_mv);
@@ -406,12 +402,15 @@ void status_service_task(void *pv) {
         uint32_t mv = (uint32_t)filtered_mv;
         
         // Calculate percentage locally with strict clamping to 0-100
-        // Li-ion: 3200mV (Empty/Shutdown) to 4150mV (Full)
-        int newBattPct = map(constrain(mv, 3200, 4150), 3200, 4150, 0, 100);
+        // Li-ion: 3300mV (Empty/Shutdown) to 4050mV (Full)
+        // We set 100% at 4050mV to ensure the UI reaches 100% before the 
+        // charging threshold kicks in, preventing state "flicker".
+        int newBattPct = map(constrain(mv, 3300, 4050), 3300, 4050, 0, 100);
         
-        // Heuristic: If reading is above 4200mV on a 1S battery, it's physically 
+        // Heuristic: If reading is above 4130mV on a 1S battery, it's physically 
         // impossible unless a charger is applying 5V to the rail.
-        bool charging = (mv > 4200); 
+        // This value is chosen to be above the 100% threshold (4050mV) but below the typical 4.2V+ charging voltage.
+        bool charging = (mv > 4130);
 
         if (!sd_card_ready() && millis() - sd_retry_ms > 5000) {
             if (!g_app_context.sniffer.pcap_active && 
@@ -1027,7 +1026,7 @@ void handleRoot() {
     File file = root.openNextFile();
     while (file) {
         if (!file.isDirectory()) {
-            html += "<li><a style='color:#00FFCC;' href=\"/dl?f=" + String(file.name()) + "\">" + String(file.name()) + "</a> (" + String(file.size()) + " bytes)</li>";
+            html += "<li><a style='color:#00FF88;' href=\"/dl?f=" + String(file.name()) + "\">" + String(file.name()) + "</a> (" + String(file.size()) + " bytes)</li>";
         }
         file = root.openNextFile();
     }
@@ -1394,7 +1393,7 @@ void main_app_task(void *pvParameters) {
         if (req_start_ble_sniff) {
             start_ble_sniff(&g_app_context);
             queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "STOP BLE SNIFF");
-            queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#00FFCC BLE SNIFFING#\n\nListening...");
+            queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#00FF88 BLE SNIFFING#\n\nListening...");
             req_start_ble_sniff = false;
         }
 

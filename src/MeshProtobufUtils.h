@@ -127,9 +127,9 @@ namespace MeshUtils {
      * suitable for the ESP32-S3 hardware.
      */
     inline uint32_t mvoltsToPct(uint32_t mvolts) {
-        if (mvolts >= 4150) return 100;
-        if (mvolts >= 4050) return 90;
-        if (mvolts >= 3950) return 80;
+        if (mvolts >= 4050) return 100; // Pad 100% to include full resting voltage (e.g., 4.05V)
+        if (mvolts >= 4000) return 90;  // 4.00V
+        if (mvolts >= 3900) return 80;  // 3.90V
         if (mvolts >= 3800) return 60;
         if (mvolts >= 3700) return 40;
         if (mvolts >= 3600) return 20;
@@ -142,7 +142,7 @@ namespace MeshUtils {
      * USB VBUS typically pulls the measured battery voltage node above 4.3V.
      */
     inline bool isHardwareCharging(uint32_t mvolts) {
-        return mvolts > 4400;
+        return mvolts > 4130;
     }
 }
 

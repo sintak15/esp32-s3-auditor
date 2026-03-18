@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint> // Use cstdint for C++ style integer types
+#include "src/UIConfig.h" // Include UIConfig for SCREEN_W, SCREEN_H etc.
 #include "constants.h"
 #include <set> // For std::set<String>
 #include <WString.h> // For String (Arduino String class)

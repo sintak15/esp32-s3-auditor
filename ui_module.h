@@ -16,7 +16,8 @@ extern lv_obj_t *lbl_ble_status;
 extern lv_obj_t *lbl_pcap_status;
 extern lv_obj_t *lbl_pcap_ch;
 extern lv_obj_t *btn_pcap_lock;
-extern lv_obj_t *probe_list;
+extern lv_obj_t *low_batt_border;
+extern lv_chart_series_t *ui_heap_series;
 extern lv_obj_t *btn_ble_sniff;
 extern lv_obj_t *btn_ble_flood;
 extern lv_obj_t *btn_pcap_start;
@@ -27,6 +28,9 @@ extern lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
 
 void ui_build();
 void no_scroll(lv_obj_t *o);
+
+// UI elements that are declared in ui_module.cpp but used elsewhere
+extern lv_obj_t *probe_list;
 
 extern void navigate_to(int tab);
 extern void cb_nav_home(lv_event_t *e);

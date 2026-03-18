@@ -14,6 +14,10 @@
 
 // Hardware Pins
 #define TFT_BL 45 // Backlight control
+#define BT_PWM_CHANNEL 0
+#define BT_PWM_FREQ    5000
+#define BT_PWM_RES     8
+
 #define TP_RST 18 // Touch reset
 #define I2C_SDA 16 // Touch I2C SDA
 #define I2C_SCL 15 // Touch I2C SCL

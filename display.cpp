@@ -22,10 +22,13 @@ extern lv_obj_t *ta_diagnostics;
 extern lv_obj_t *sys_stats_panel;
 extern lv_obj_t *ta_sys_stats;
 extern lv_obj_t *lbl_gps_data;
+extern lv_obj_t *low_batt_border;
+extern lv_obj_t *lbl_pcap_status; // Added extern for lbl_pcap_status
 extern lv_obj_t *battery_stats_panel;
 extern lv_obj_t *lbl_battery_stats;
 extern lv_obj_t *ui_battery_chart;
 extern lv_chart_series_t *ui_battery_series;
+extern lv_chart_series_t *ui_heap_series;
 
 extern void trace_enter(const char *s);
 extern void trace_exit(const char *s);
@@ -139,8 +142,10 @@ static void touch_service_task(void *pv) {
 }
 
 void display_init() {
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
+    // Core 3.x syntax: Attach pin directly to frequency and resolution
+    ledcAttach(TFT_BL, BT_PWM_FREQ, BT_PWM_RES);
+    ledcWrite(TFT_BL, 255);
+
     pinMode(TP_RST, OUTPUT);
     digitalWrite(TP_RST, LOW);
     delay(100);
@@ -266,6 +271,19 @@ void ui_update_tick(lv_timer_t *timer) {
         last_batteryPct = ss.batteryPct;
         last_isCharging = ss.isCharging;
         last_batteryMv = ss.batteryMv;
+    }
+
+    // Toggle Low Battery Alert Border
+    if (low_batt_border) {
+        bool is_low = (ss.batteryPct <= 10 && !ss.isCharging);
+        if (is_low) {
+            lv_obj_clear_flag(low_batt_border, LV_OBJ_FLAG_HIDDEN);
+            // Create a pulsing effect using a triangle wave
+            int opa = 100 + (abs((int)(millis() % 2000) - 1000) / 10); 
+            lv_obj_set_style_border_opa(low_batt_border, opa, 0);
+        } else {
+            lv_obj_add_flag(low_batt_border, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     if ((int)batt_col != last_batt_col) {
@@ -444,8 +462,9 @@ void ui_update_tick(lv_timer_t *timer) {
     // Background Battery History Tracking (Updates even when panel is hidden)
     static uint32_t last_chart_update = 0;
     if (millis() - last_chart_update > 5000) {
-        if (ui_battery_chart && ui_battery_series) {
+        if (ui_battery_chart && ui_battery_series && ui_heap_series) {
             lv_chart_set_next_value(ui_battery_chart, ui_battery_series, ss.batteryMv);
+            lv_chart_set_next_value(ui_battery_chart, ui_heap_series, ESP.getFreeHeap() / 1024);
         }
         last_chart_update = millis();
     }
@@ -523,10 +542,9 @@ void ui_update_tick(lv_timer_t *timer) {
     // Update System Stats Panel if visible
     if (sys_stats_panel && !lv_obj_has_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN) && ta_sys_stats) {
         static uint32_t last_sys_stats_draw = 0;
-        if (millis() - last_sys_stats_draw > 1000) {
-            char buf[512];
+        if (millis() - last_sys_stats_draw > 2000) { // Slower refresh for task stats stability
+            char buf[1024]; // Increased buffer for task list
             get_perf_stats(buf, sizeof(buf));
-            
             lv_textarea_set_text(ta_sys_stats, buf);
             last_sys_stats_draw = millis();
         }
