@@ -617,20 +617,6 @@ void ui_build() {
   ui_battery_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00FF88), LV_CHART_AXIS_PRIMARY_Y);
   ui_heap_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00AAFF), LV_CHART_AXIS_SECONDARY_Y);
 
-  lv_obj_t *btn_reset_cal = lv_btn_create(battery_stats_panel);
-  lv_obj_set_size(btn_reset_cal, SCREEN_W - (UI::Layout::Margin * 2), 30);
-  lv_obj_align(btn_reset_cal, LV_ALIGN_BOTTOM_MID, 0, -45);
-  lv_obj_add_style(btn_reset_cal, &style_btn_dark, 0);
-  
-  lv_obj_add_event_cb(btn_reset_cal, [](lv_event_t *e) {
-      if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
-          extern void reset_battery_calibration();
-          reset_battery_calibration();
-          lv_label_set_text(lv_obj_get_child(e->target, 0), LV_SYMBOL_REFRESH " CALIBRATION CLEARED");
-      }
-  }, LV_EVENT_ALL, nullptr);
-  lv_obj_t *lbl_reset = lv_label_create(btn_reset_cal); lv_label_set_text(lbl_reset, "HOLD TO RESET CALIB"); lv_obj_center(lbl_reset);
-
   add_settings_back_btn(battery_stats_panel);
 
   // --- About Sub-Tab ---
@@ -652,8 +638,22 @@ void ui_build() {
   lv_obj_align(lbl_build_date, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 60);
 
   lbl_device_id = lv_label_create(about_panel);
-  lv_label_set_text(lbl_device_id, "Device ID: XX:XX:XX:XX:XX:XX");
+  lv_label_set_text(lbl_device_id, "Platform: Arduino IDE");
   lv_obj_align(lbl_device_id, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 80);
+
+  lv_obj_t *btn_reset_cal = lv_btn_create(about_panel);
+  lv_obj_set_size(btn_reset_cal, SCREEN_W - (UI::Layout::Margin * 2), 30);
+  lv_obj_align(btn_reset_cal, LV_ALIGN_BOTTOM_MID, 0, -45);
+  lv_obj_add_style(btn_reset_cal, &style_btn_dark, 0);
+  
+  lv_obj_add_event_cb(btn_reset_cal, [](lv_event_t *e) {
+      if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
+          extern void reset_battery_calibration();
+          reset_battery_calibration();
+          lv_label_set_text(lv_obj_get_child(e->target, 0), LV_SYMBOL_REFRESH " CALIBRATION CLEARED");
+      }
+  }, LV_EVENT_ALL, nullptr);
+  lv_obj_t *lbl_reset = lv_label_create(btn_reset_cal); lv_label_set_text(lbl_reset, "HOLD TO RESET CALIB"); lv_obj_center(lbl_reset);
 
   add_settings_back_btn(about_panel);
 

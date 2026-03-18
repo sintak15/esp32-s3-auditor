@@ -1350,7 +1350,7 @@ void setup() {
     // Wake up the connected LoRa node
     wake_meshtastic_node();
 
-    Serial.println("ESP32-S3 Auditor ready (Refactored).");
+    Serial.println("ESP32-S3 Auditor ready (Build: Arduino IDE).");
     
     static uint8_t* local_ui_queue_storage = (uint8_t*)ps_malloc(15 * sizeof(LocalUiEvent));
     static StaticQueue_t* local_ui_queue_buffer = (StaticQueue_t*)ps_malloc(sizeof(StaticQueue_t));

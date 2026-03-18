@@ -1,67 +1,50 @@
-# ESP32-S3 Auditor (Refactored)
+# ESP32-S3 Auditor Suite
 
-A high-performance ESP32-S3-based wireless analysis and auditing toolkit featuring Wi-Fi scanning, BLE sniffing/flooding, LoRa support, SD logging, and a real-time LVGL UI.
+A comprehensive security auditing and Meshtastic-integrated tool for the ESP32-S3 (CYD/S3 hardware).
 
-This version is heavily refactored for stability, performance, and memory safety.
+## 🛠 Arduino IDE Setup
 
----
+### Board Manager
+1. Open **File > Preferences**.
+2. Add this URL to "Additional Board Manager URLs": 
+   `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
+3. Go to **Tools > Board > Boards Manager**, search for `esp32` by Espressif, and install version **3.3.7** (matching your current environment).
 
-## 🚀 Features
+### Board Settings (Critical)
+Select **Tools** and configure these exact settings:
+- **Board:** "ESP32S3 Dev Module"
+- **USB CDC On Boot:** "Enabled" (Allows Serial monitoring via the USB-C port)
+- **Flash Size:** "16MB (128Mb)"
+- **Partition Scheme:** "16M Flash (3MB APP/9MB FATFS)" 
+- **PSRAM:** "OPI PSRAM" (Required for high-speed UI buffers)
+- **CPU Frequency:** "240MHz (WiFi/BT)"
 
-### 📡 Wi-Fi
-- Active AP scanning
-- Station (client) detection
-- AP ↔ client association mapping (linked view)
-- Channel hopping
-- Promiscuous mode capture
-- PCAP queue pipeline (for logging/export)
+### Required Libraries
+Install these via **Tools > Manage Libraries**:
+1. **lvgl** (v8.3.11) - *Note: requires a custom `lv_conf.h` in your libraries folder*
+2. **TFT_eSPI** (v2.5.43) - *Note: requires a custom `User_Setup.h` for your display pins*
+3. **NimBLE-Arduino** (v2.3.9) - For BLE sniffing and flooding
+4. **Nanopb** - For Meshtastic Protobuf communication
 
-### 📶 BLE
-- BLE advertisement sniffing (NimBLE-based)
-- BLE resilience testing (advertising flood audit)
-- Fixed-size unique device tracking (no heap fragmentation)
-- Ring-buffer packet pipeline
-- SD logging support
+## 📂 Project Structure
+- `esp32-s3-auditor.ino`: Main entry point and task management.
+- `ui_module.cpp`: LVGL UI definitions and layout.
+- `display.cpp`: Low-level display drivers and I2C touch handling.
+- `wifi_scanner.cpp`: AP and Station detection logic.
+- `pentest_attacks.cpp`: Deauth, Beacon, and PMKID capture implementations.
+- `lora_service_task`: (Internal to .ino) Handles Meshtastic Protobuf over Serial.
 
-### 📻 LoRa
-- Packet decoding pipeline
-- Background service task
-- UI + logging integration
+## 🚀 Build Instructions
+1. Open `esp32-s3-auditor.ino` in Arduino IDE.
+2. Verify the pins in `constants.h` match your specific hardware (Current: Heltec/CYD-S3 layout).
+3. Press **Upload**.
 
-### 💾 Storage
-- SD card logging (Wi-Fi + BLE)
-- FAT partition support
-- Non-blocking logging pipeline
-
-### 🖥 UI (LVGL)
-- Real-time scan display
-- Multi-tab interface
-- Touch-safe rendering (no redraw during scroll)
-- Fixed object pools (no LVGL fragmentation)
-
----
-
-## 🧠 Architecture
-
-### RTOS Task Layout
-
-| Task | Core | Purpose |
-|------|------|--------|
-| main_app_task | 0 | UI + coordination |
-| ble_task | 0 | BLE control + flood |
-| lora_service_task | 1 | LoRa processing |
-| LVGL timer | 1 | UI rendering |
+## ⚠️ Troubleshooting
+- **Boot Loops:** Usually caused by choosing "Internal RAM" for LVGL buffers instead of PSRAM. Ensure PSRAM is set to **OPI**.
+- **SD Card Failed:** Ensure the SD card is formatted as FAT32.
+- **LoRa No Signal:** This suite connects to an *external* Meshtastic node via Serial (TX/RX). Ensure the node is in "Serial" mode.
 
 ---
-
-## 📜 License (MIT)
-
-MIT License
-
-Copyright (c) 2026 Justin Stephenson
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+**Firmware Version:** v1.0.0  
+**Build Environment:** Arduino IDE
+```
