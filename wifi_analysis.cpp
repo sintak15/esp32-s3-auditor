@@ -1,4 +1,4 @@
-#include "pentest_attacks.h"
+#include "wifi_analysis.h"
 #include "constants.h"
 #include "wifi_scanner.h" // For set_promiscuous_channel
 #include "types.h" // Ensure types.h is included for AppContext definition
@@ -11,7 +11,7 @@
 extern lv_obj_t *btn_deauth, *btn_beacon, *btn_pmkid, *btn_stop_pt;
 extern lv_obj_t *lbl_pt_status;
 
-static AppContext* pentest_context = nullptr;
+static AppContext* analysis_context = nullptr;
 
 // Safe wrapper: esp_wifi_80211_tx requires WIFI_IF_STA (interface 0) to be started.
 // If the interface isn't ready it returns ESP_ERR_INVALID_ARG and logs "invalid interface 0".
@@ -44,8 +44,8 @@ static const uint8_t beacon_header[] = {
 static uint8_t beacon_frame[128];
 
 
-void pentest_attacks_init(AppContext* context) {
-    pentest_context = context;
+void wifi_analysis_init(AppContext* context) {
+    analysis_context = context;
 }
 
 void spoof_mac() {
@@ -55,7 +55,7 @@ void spoof_mac() {
     esp_wifi_set_mac(WIFI_IF_STA, mac);
 }
 
-static void show_pentest_buttons(bool show) {
+static void show_analysis_buttons(bool show) {
     auto f = show ? lv_obj_clear_flag : lv_obj_add_flag;
     f(btn_deauth, LV_OBJ_FLAG_HIDDEN);
     f(btn_beacon, LV_OBJ_FLAG_HIDDEN);
@@ -63,7 +63,7 @@ static void show_pentest_buttons(bool show) {
     lv_obj_add_flag(btn_stop_pt, LV_OBJ_FLAG_HIDDEN); // Always hide stop button when returning to idle
 }
 
-void stop_pentest(AppContext* context) {
+void stop_analysis(AppContext* context) {
     if (context->pentest.pentest_timer) {
         lv_timer_del(context->pentest.pentest_timer);
         context->pentest.pentest_timer = nullptr;
@@ -75,17 +75,17 @@ void stop_pentest(AppContext* context) {
     context->wifi_scan.paused = false;
     esp_wifi_set_promiscuous(false);
     lv_label_set_text(lbl_pt_status, "#444444 IDLE#");
-    show_pentest_buttons(context->wifi_scan.selected_net >= 0 || context->wifi_scan.deauth_sta_target >= 0);
+    show_analysis_buttons(context->wifi_scan.selected_net >= 0 || context->wifi_scan.deauth_sta_target >= 0);
 }
 
-void deauth_tick(lv_timer_t *timer) {
+void deauth_demonstration_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
     int selectedNet = context->wifi_scan.selected_net;
     int deauth_sta_target = context->wifi_scan.deauth_sta_target;
 
     if (selectedNet < 0 && deauth_sta_target < 0) {
-        stop_pentest(context);
+        stop_analysis(context);
         return;
     }
 
@@ -140,7 +140,7 @@ void deauth_tick(lv_timer_t *timer) {
     }
 }
 
-void beacon_tick(lv_timer_t *timer) {
+void beacon_spam_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
     
@@ -166,19 +166,19 @@ void beacon_tick(lv_timer_t *timer) {
     wifi_tx(beacon_frame, flen);
 }
 
-void pmkid_tick(lv_timer_t *timer) {
+void pmkid_capture_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
 
     if (context->pentest.pmkid_found) {
         lv_label_set_text(lbl_pt_status, "#00FF88 PMKID CAPTURED!#\nSaved to SD");
-        stop_pentest(context);
+        stop_analysis(context);
     }
 }
 
 void pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
-    if (!pentest_context) return;
-    AppContext* context = pentest_context;
+    if (!analysis_context) return;
+    AppContext* context = analysis_context;
 
     if (context->pentest.pmkid_found || type != WIFI_PKT_DATA) return;
     

@@ -2,7 +2,7 @@
 #include "sd_logger.h"
 #include <Arduino.h>
 #include <nvs_flash.h> // For NVS functions
-#include "pentest_attacks.h" // For save_beacon_ssids_to_nvs
+#include "wifi_analysis.h" // For save_beacon_ssids_to_nvs
 #include "types.h" // Includes constants.h indirectly
 #include "constants.h" // Explicitly include constants.h for MAX_BEACON_SSIDS etc.
 
@@ -296,7 +296,7 @@ void ui_build() {
   lv_obj_set_style_bg_color(btn_stop_pt,lv_color_hex(0x1A0000),0);
   lv_obj_set_style_border_color(btn_stop_pt,lv_color_hex(0xFF0000),0);
   lv_obj_set_style_border_width(btn_stop_pt,2,0);
-  lv_obj_add_event_cb(btn_stop_pt,cb_stop_pentest,LV_EVENT_CLICKED,nullptr);
+  lv_obj_add_event_cb(btn_stop_pt,cb_stop_analysis,LV_EVENT_CLICKED,nullptr);
   lv_obj_t *sl2=lv_label_create(btn_stop_pt); lv_label_set_text(sl2,LV_SYMBOL_STOP " STOP");
   lv_obj_set_style_text_color(sl2,lv_color_hex(0xFF0000),0); lv_obj_center(sl2);
   lv_obj_add_flag(btn_stop_pt,LV_OBJ_FLAG_HIDDEN);

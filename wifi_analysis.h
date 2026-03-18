@@ -3,16 +3,16 @@
 #include "types.h" // Changed from state.h to types.h
 #include <esp_wifi_types.h>
 
-void pentest_attacks_init(AppContext* context);
-void start_deauth_attack(AppContext* context);
-void start_beacon_flood(AppContext* context);
+void wifi_analysis_init(AppContext* context);
+void start_deauth_demonstration(AppContext* context);
+void start_beacon_spam(AppContext* context);
 void start_pmkid_capture(AppContext* context);
-void stop_pentest(AppContext* context);
+void stop_analysis(AppContext* context);
 
-// LVGL timer callbacks for attacks
-void deauth_tick(lv_timer_t *timer);
-void beacon_tick(lv_timer_t *timer);
-void pmkid_tick(lv_timer_t *timer);
+// LVGL timer callbacks for analysis
+void deauth_demonstration_tick(lv_timer_t *timer);
+void beacon_spam_tick(lv_timer_t *timer);
+void pmkid_capture_tick(lv_timer_t *timer);
 
 // NVS functions for beacon SSIDs
 void load_beacon_ssids_from_nvs(AppContext* context);
