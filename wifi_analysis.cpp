@@ -64,14 +64,14 @@ static void show_analysis_buttons(bool show) {
 }
 
 void stop_analysis(AppContext* context) {
-    if (context->pentest.pentest_timer) {
-        lv_timer_del(context->pentest.pentest_timer);
-        context->pentest.pentest_timer = nullptr;
+    if (context->analysis.analysis_timer) {
+        lv_timer_del(context->analysis.analysis_timer);
+        context->analysis.analysis_timer = nullptr;
     }
-    if (context->pentest.current_mode == PT_PMKID) {
+    if (context->analysis.current_mode == PT_PMKID) {
         // DO NOT unregister the callback! Gated booleans are safer against Core 0 panics.
     }
-    context->pentest.current_mode = PT_NONE;
+    context->analysis.current_mode = PT_NONE;
     context->wifi_scan.paused = false;
     esp_wifi_set_promiscuous(false);
     lv_label_set_text(lbl_pt_status, "#444444 IDLE#");
@@ -144,9 +144,9 @@ void beacon_spam_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
     
-    if (context->pentest.custom_beacon_ssids.empty()) return; // No SSIDs to flood
+    if (context->analysis.custom_beacon_ssids.empty()) return; // No SSIDs to flood
 
-    const char *ssid = context->pentest.custom_beacon_ssids[context->pentest.beacon_idx++ % context->pentest.custom_beacon_ssids.size()].c_str();
+    const char *ssid = context->analysis.custom_beacon_ssids[context->analysis.beacon_idx++ % context->analysis.custom_beacon_ssids.size()].c_str();
     
     uint8_t mac[6];
     esp_fill_random(mac, 6);
@@ -170,7 +170,7 @@ void pmkid_capture_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
 
-    if (context->pentest.pmkid_found) {
+    if (context->analysis.pmkid_found) {
         lv_label_set_text(lbl_pt_status, "#00FF88 PMKID CAPTURED!#\nSaved to SD");
         stop_analysis(context);
     }
@@ -180,7 +180,7 @@ void pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!analysis_context) return;
     AppContext* context = analysis_context;
 
-    if (context->pentest.pmkid_found || type != WIFI_PKT_DATA) return;
+    if (context->analysis.pmkid_found || type != WIFI_PKT_DATA) return;
     
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
     const uint8_t *data = pkt->payload;
@@ -191,8 +191,8 @@ void pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     const WifiMgmtHdr* hdr = (const WifiMgmtHdr*)data;
 
     // Check if packet is to/from the target AP
-    if (memcmp(hdr->bssid, context->pentest.pmkid_target_bssid, 6) != 0 &&
-        memcmp(hdr->source_addr, context->pentest.pmkid_target_bssid, 6) != 0) return;
+    if (memcmp(hdr->bssid, context->analysis.pmkid_target_bssid, 6) != 0 &&
+        memcmp(hdr->source_addr, context->analysis.pmkid_target_bssid, 6) != 0) return;
 
     // Find EAPOL frame (802.1x)
     int eapol_offset = -1;
@@ -230,7 +230,7 @@ void pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
             const char* essid = "UNKNOWN"; // Default if not found
             if (context->wifi_scan.mutex && xSemaphoreTake(context->wifi_scan.mutex, 0) == pdTRUE) {
                 for (int k = 0; k < context->wifi_scan.ap_count; k++) {
-                    if (memcmp(context->wifi_scan.ap_list[k].bssid, context->pentest.pmkid_target_bssid, 6) == 0) {
+                    if (memcmp(context->wifi_scan.ap_list[k].bssid, context->analysis.pmkid_target_bssid, 6) == 0) {
                         strncpy(essid_str, context->wifi_scan.ap_list[k].ssid, 32);
                         essid_str[32] = '\0'; // Ensure null termination
                         essid = essid_str;
@@ -243,10 +243,10 @@ void pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
             // Log to SD card using the raw PMKID data and other info.
             // The sd_log_pmkid function will handle formatting for hashcat and CSV. The sd_log_pmkid function takes the raw PMKID, AP MAC, STA MAC, and ESSID.
             // ie->data points to the 16-byte PMKID.
-            sd_log_pmkid(ie->data, context->pentest.pmkid_target_bssid, hdr->source_addr, essid);
+            sd_log_pmkid(ie->data, context->analysis.pmkid_target_bssid, hdr->source_addr, essid);
 
-            // Signal to the UI timer that the PMKID was found to stop pentest safely
-            context->pentest.pmkid_found = true;
+            // Signal to the UI timer that the PMKID was found to stop analysis safely
+            context->analysis.pmkid_found = true;
             return; // PMKID found and processed, no need to continue
         }
     } // Closing brace for the for loop
@@ -261,7 +261,7 @@ void load_beacon_ssids_from_nvs(AppContext* context) {
         return;
     }
 
-    context->pentest.custom_beacon_ssids.clear();
+    context->analysis.custom_beacon_ssids.clear();
     size_t required_size;
     char ssid_buf[MAX_BEACON_SSID_LENGTH + 1];
 
@@ -271,7 +271,7 @@ void load_beacon_ssids_from_nvs(AppContext* context) {
         required_size = sizeof(ssid_buf);
         err = nvs_get_str(nvs_handle, key, ssid_buf, &required_size);
         if (err == ESP_OK) {
-            context->pentest.custom_beacon_ssids.push_back(String(ssid_buf));
+            context->analysis.custom_beacon_ssids.push_back(String(ssid_buf));
         } else if (err == ESP_ERR_NVS_NOT_FOUND) {
             // No more SSIDs found
             break;
@@ -295,10 +295,10 @@ void save_beacon_ssids_to_nvs(AppContext* context) {
         snprintf(key, sizeof(key), "%s_%d", NVS_BEACON_SSIDS_KEY, i);
         nvs_erase_key(nvs_handle, key);
     }
-    for (int i = 0; i < context->pentest.custom_beacon_ssids.size(); ++i) {
+    for (int i = 0; i < context->analysis.custom_beacon_ssids.size(); ++i) {
         char key[16];
         snprintf(key, sizeof(key), "%s_%d", NVS_BEACON_SSIDS_KEY, i);
-        nvs_set_str(nvs_handle, key, context->pentest.custom_beacon_ssids[i].c_str());
+        nvs_set_str(nvs_handle, key, context->analysis.custom_beacon_ssids[i].c_str());
     }
     nvs_commit(nvs_handle);
     nvs_close(nvs_handle);

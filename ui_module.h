@@ -5,7 +5,7 @@
 
 extern lv_obj_t *main_screen, *status_bar, *tabview;
 extern lv_obj_t *lbl_sd, *lbl_wifi, *lbl_gps_fix, *lbl_batt, *lbl_batt_pct;
-extern lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_gps;
+extern lv_obj_t *tab_home, *tab_scan, *tab_analysis, *tab_gps;
 extern lv_obj_t *tab_ble, *tab_pcap, *tab_probes, *tab_settings;
 extern lv_obj_t *lbl_gps_info;
 extern lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
