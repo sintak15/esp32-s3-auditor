@@ -1,7 +1,7 @@
-#include "sd_logger.h"
+#include "sd_log.h"
 #include "constants.h"
 #include <SD_MMC.h>
-#include "wifi_scanner.h"
+#include "wifi_scan.h"
 #include <esp_heap_caps.h>
 
 static bool sd_ready = false;
@@ -74,7 +74,7 @@ static void sd_log_task(void* pvParameters) {
     }
 }
 
-void sd_logger_init() {
+void sd_log_init() {
     SD_MMC.setPins(38, 40, 39, 41, 48, 47);
     sd_ready = SD_MMC.begin("/sdcard", true);
     if (sd_ready) {
@@ -117,7 +117,7 @@ void sd_reinit() {
     }
 }
 
-void sd_log_scan(AppContext* context) {
+void sd_log_scanned_aps(AppContext* context) {
     if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     
     double lat = 0.0;
@@ -152,7 +152,7 @@ void sd_log_scan(AppContext* context) {
     }
 }
 
-void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl_mac, const char *ssid) {
+void sd_log_captured_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl_mac, const char *ssid) {
     if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     auto hex = [](const uint8_t *b, int n, char *o) {
         for (int i = 0; i < n; i++) sprintf(o + i * 2, "%02x", b[i]);
@@ -178,7 +178,7 @@ void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl
     }
 }
 
-void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi) {
+void sd_log_ble_advertisement(unsigned long timestamp, const char* mac, int8_t rssi) {
     if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     LogMsg msg;
     msg.target = LOG_TARGET_BLE;
@@ -188,7 +188,7 @@ void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi) {
     }
 }
 
-void sd_log_probe(const char* ssid) {
+void sd_log_probe_request(const char* ssid) {
     if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     LogMsg msg;
     msg.target = LOG_TARGET_PROBE;
@@ -200,7 +200,7 @@ void sd_log_probe(const char* ssid) {
 
 // --- PCAP File Management ---
 
-bool sd_logger_pcap_file_open(AppContext* context) { // Renamed function
+bool pcap_file_open(AppContext* context) {
     if (!sd_ready) return false;
     
     if (!sd_has_working_heap(32768)) {
@@ -229,7 +229,7 @@ bool sd_logger_pcap_file_open(AppContext* context) { // Renamed function
     return true;
 }
 
-bool sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // Renamed function
+bool pcap_file_write_record(AppContext* context, pcap_record_t* record) { // Renamed function
     if (!context || !context->sniffer.pcap_file) return false;
 
     if (!sd_has_working_heap(24576)) {
@@ -248,7 +248,7 @@ bool sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // 
     size_t w2 = context->sniffer.pcap_file.write(record->payload, record->len);
     uint32_t dt = millis() - t;
     
-    if (dt > 20) Serial.printf("[DIAG] slow: sd_logger_pcap_file_write %lu ms\n", (unsigned long)dt);
+    if (dt > 20) Serial.printf("[DIAG] slow: pcap_file_write_record %lu ms\n", (unsigned long)dt);
     
     if (w1 != sizeof(h) || w2 != record->len) {
         Serial.println("[PCAP] WRITE FAILED");
@@ -260,7 +260,7 @@ bool sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // 
     return true;
 }
 
-void sd_logger_pcap_file_close(AppContext* context) { // Renamed function
+void pcap_file_close(AppContext* context) {
     if (context->sniffer.pcap_file) {
         context->sniffer.pcap_file.flush();
         context->sniffer.pcap_file.close();

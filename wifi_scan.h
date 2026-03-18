@@ -9,15 +9,15 @@
 extern "C" {
 #endif
 
-void wifi_scanner_init(AppContext *ctx);
+void wifi_scan_init(AppContext *ctx);
 const char* enc_str(uint8_t enc);   // <-- added declaration
 
-void restore_sta_sniffer(AppContext *ctx);
-void run_ap_scan(AppContext *ctx);
-void render_scan_list(AppContext *ctx);
-void set_promiscuous_channel(uint8_t ch);
+void sta_sniffer_restore(AppContext *ctx);
+void ap_scan_start(AppContext *ctx);
+void scan_list_render(AppContext *ctx);
+void promiscuous_channel_set(uint8_t ch);
 void mac_str(const uint8_t *mac, char *out);
-void scan_tick(lv_timer_t *timer);
+void wifi_scan_tick(lv_timer_t *timer);
 
 #ifdef __cplusplus
 }

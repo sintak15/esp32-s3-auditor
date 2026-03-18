@@ -1,4 +1,4 @@
-#include "wifi_scanner.h"
+#include "wifi_scan.h"
 #include "constants.h"
 #include "types.h"
 #include <WiFi.h>
@@ -17,7 +17,7 @@ extern void trace_exit(const char *s);
 
 static bool deferred_render = false;
 
-void wifi_scanner_init(AppContext *ctx) {
+void wifi_scan_init(AppContext *ctx) {
     context = ctx;
     if (context && !context->wifi_scan.mutex) {
         context->wifi_scan.mutex = xSemaphoreCreateMutex();
@@ -39,18 +39,18 @@ const char* enc_str(uint8_t enc) {
     }
 }
 
-void restore_sta_sniffer(AppContext *ctx) {
-    // Deprecated: Promiscuous mode is now safely toggled dynamically by run_ap_scan and scan_tick
+void sta_sniffer_restore(AppContext *ctx) {
+    // Deprecated: Promiscuous mode is now safely toggled dynamically by ap_scan_start and wifi_scan_tick
 }
 
-void run_ap_scan(AppContext *ctx) {
+void ap_scan_start(AppContext *ctx) {
     if (!ctx) return;
     // CRITICAL: Cannot scan while promiscuous mode is enabled, it will crash the ESP32
     esp_wifi_set_promiscuous(false);
     WiFi.scanNetworks(true); // async scan
 }
 
-void render_scan_list(AppContext *ctx) {
+void scan_list_render(AppContext *ctx) {
     if (!ctx || !scan_list || !lbl_scan_count) return;
 
     uint32_t t0 = millis();
@@ -261,11 +261,11 @@ void render_scan_list(AppContext *ctx) {
 
     uint32_t dt = millis() - t0;
     if (dt > 10) {
-        Serial.printf("[DIAG] slow: render_scan_list %lu ms\n", (unsigned long)dt);
+        Serial.printf("[DIAG] slow: scan_list_render %lu ms\n", (unsigned long)dt);
     }
 }
 
-void set_promiscuous_channel(uint8_t ch) {
+void promiscuous_channel_set(uint8_t ch) {
     esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
 }
 
@@ -273,7 +273,7 @@ void mac_str(const uint8_t *mac, char *out) {
     sprintf(out, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
-void scan_tick(lv_timer_t *timer) {
+void wifi_scan_tick(lv_timer_t *timer) {
     static uint8_t phase = 0;
     static bool ui_scan_dirty = false;
     uint32_t start = millis();
@@ -281,7 +281,7 @@ void scan_tick(lv_timer_t *timer) {
     AppContext *ctx = (AppContext *)timer->user_data;
     if (!ctx || ctx->wifi_scan.paused) { 
         if (millis() - start > 10) {
-            Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)(millis() - start));
+            Serial.printf("[DIAG] slow: wifi_scan_tick %lu ms\n", (unsigned long)(millis() - start));
         }
         return; 
     }
@@ -318,7 +318,7 @@ void scan_tick(lv_timer_t *timer) {
             }
 
             if (millis() - ctx->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS) {
-                run_ap_scan(ctx);
+                ap_scan_start(ctx);
                 ctx->wifi_scan.last_scan_ms = millis();
             }
             break;
@@ -333,7 +333,7 @@ void scan_tick(lv_timer_t *timer) {
                 lv_indev_t * indev = lv_indev_get_next(NULL);
                 bool is_scrolling = scan_list ? lv_obj_is_scrolling(scan_list) : false;
                 if ((!indev || indev->proc.state == LV_INDEV_STATE_REL) && !is_scrolling) {
-                    render_scan_list(ctx);
+                    scan_list_render(ctx);
                     ui_scan_dirty = false;
                 } else {
                     deferred_render = true; // Try again next time
@@ -346,6 +346,6 @@ void scan_tick(lv_timer_t *timer) {
 
     uint32_t dt = millis() - start;
     if (dt > 10) {
-        Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)dt);
+        Serial.printf("[DIAG] slow: wifi_scan_tick %lu ms\n", (unsigned long)dt);
     }
 }

@@ -1,6 +1,6 @@
 #include "wifi_analysis.h"
 #include "constants.h"
-#include "wifi_scanner.h" // For set_promiscuous_channel
+#include "wifi_scan.h" // For promiscuous_channel_set
 #include "types.h" // Ensure types.h is included for AppContext definition
 #include "sd_logger.h"
 #include "wifi_frames.h"
@@ -241,9 +241,9 @@ void pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
             }
 
             // Log to SD card using the raw PMKID data and other info.
-            // The sd_log_pmkid function will handle formatting for hashcat and CSV. The sd_log_pmkid function takes the raw PMKID, AP MAC, STA MAC, and ESSID.
+            // The sd_log_captured_pmkid function will handle formatting for hashcat and CSV. The sd_log_captured_pmkid function takes the raw PMKID, AP MAC, STA MAC, and ESSID.
             // ie->data points to the 16-byte PMKID.
-            sd_log_pmkid(ie->data, context->analysis.pmkid_target_bssid, hdr->source_addr, essid);
+            sd_log_captured_pmkid(ie->data, context->analysis.pmkid_target_bssid, hdr->source_addr, essid);
 
             // Signal to the UI timer that the PMKID was found to stop analysis safely
             context->analysis.pmkid_found = true;
