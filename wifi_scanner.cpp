@@ -55,13 +55,13 @@ void render_scan_list(AppContext *ctx) {
 
     uint32_t t0 = millis();
 
-    // Optimization & Safety: Don't rebuild the list if the Scan tab isn't active.
-    // Prevents Use-After-Free crashes when navigating away after clicking a button.
-    if (tabview && lv_tabview_get_tab_act(tabview) != 1) { // 1 is the Scan tab
+    // Don't waste time rebuilding if Scan tab isn't visible.
+    if (tabview && lv_tabview_get_tab_act(tabview) != 1) { // 1 = Scan tab
         deferred_render = true;
         return;
     }
 
+    // Avoid rebuilding while the user is touching / scrolling.
     lv_indev_t * indev = lv_indev_get_next(NULL);
     bool is_scrolling = scan_list ? lv_obj_is_scrolling(scan_list) : false;
     if ((indev && indev->proc.state == LV_INDEV_STATE_PR) || is_scrolling) {
@@ -70,115 +70,189 @@ void render_scan_list(AppContext *ctx) {
     }
     deferred_render = false;
 
-    static ScanView last_view = (ScanView)-1;
+    // Throttle UI rebuilds a bit. This alone helps a lot.
+    static uint32_t last_render_ms = 0;
+    if (millis() - last_render_ms < 300) return;
+    last_render_ms = millis();
 
-    char buf[128];
-    if (ctx->wifi_scan.mutex && xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    static ScanView last_view = (ScanView)-1;
+    static bool pool_initialized = false;
+
+    // Fixed UI pool: no delete/recreate churn every scan.
+    // Keep this conservative to avoid over-allocating LVGL objects.
+    static constexpr uint16_t MAX_SCAN_UI_ITEMS = 40;
+    static lv_obj_t *item_btns[MAX_SCAN_UI_ITEMS] = {nullptr};
+
+    auto ensure_pool = [&]() {
+        if (pool_initialized) return;
+
+        for (uint16_t i = 0; i < MAX_SCAN_UI_ITEMS; i++) {
+            lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_WIFI, "");
+            item_btns[i] = btn;
+
+            if (btn) {
+                lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
+                // Safe default; callback only matters for AP/LINKED items.
+                lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
+                lv_obj_set_user_data(btn, (void*)(intptr_t)-1);
+            }
+        }
+
+        pool_initialized = true;
+    };
+
+    auto hide_all_items = [&]() {
+        for (uint16_t i = 0; i < MAX_SCAN_UI_ITEMS; i++) {
+            if (item_btns[i]) {
+                lv_obj_add_flag(item_btns[i], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_user_data(item_btns[i], (void*)(intptr_t)-1);
+            }
+        }
+    };
+
+    auto set_item = [&](uint16_t slot, const void *icon_src, const char *txt, intptr_t user_data) {
+        if (slot >= MAX_SCAN_UI_ITEMS) return;
+        lv_obj_t *btn = item_btns[slot];
+        if (!btn) return;
+
+        // Child 0 = icon label, child 1 = text label for lv_list_add_btn
+        lv_obj_t *icon = lv_obj_get_child(btn, 0);
+        lv_obj_t *label = lv_obj_get_child(btn, 1);
+
+        if (icon && icon_src) lv_label_set_text(icon, (const char *)icon_src);
+        if (label) lv_label_set_text(label, txt ? txt : "");
+        lv_obj_set_user_data(btn, (void*)user_data);
+        lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
+    };
+
+    ensure_pool();
+
+    char count_buf[64];
+
+    if (ctx->wifi_scan.mutex &&
+        xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+
+        snprintf(count_buf, sizeof(count_buf), "APs: %d  STAs: %d",
+                 ctx->wifi_scan.ap_count, ctx->wifi_scan.sta_count);
+        lv_label_set_text(lbl_scan_count, count_buf);
+
+        // View change: just hide the pool, do not destroy anything.
         if (last_view != ctx->wifi_scan.view) {
-            lv_obj_clean(scan_list);
+            hide_all_items();
             last_view = ctx->wifi_scan.view;
         }
 
-        snprintf(buf, sizeof(buf), "APs: %d  STAs: %d", ctx->wifi_scan.ap_count, ctx->wifi_scan.sta_count);
-        lv_label_set_text(lbl_scan_count, buf);
-        
+        uint16_t slot = 0;
+
         if (ctx->wifi_scan.view == VIEW_AP) {
-            uint32_t child_idx = 0;
-            for (int i = 0; i < ctx->wifi_scan.ap_count; i++) {
-                if (ctx->wifi_scan.ap_list[i].active) {
-                    char bss[18];
-                    sprintf(bss, "%02X:%02X:%02X:%02X:%02X:%02X", 
-                            ctx->wifi_scan.ap_list[i].bssid[0], ctx->wifi_scan.ap_list[i].bssid[1],
-                            ctx->wifi_scan.ap_list[i].bssid[2], ctx->wifi_scan.ap_list[i].bssid[3],
-                            ctx->wifi_scan.ap_list[i].bssid[4], ctx->wifi_scan.ap_list[i].bssid[5]);
-                    char txt[128];
-                    snprintf(txt, sizeof(txt), "[%s] %s (Ch:%d, %ddBm)", enc_str(ctx->wifi_scan.ap_list[i].enc), ctx->wifi_scan.ap_list[i].ssid, ctx->wifi_scan.ap_list[i].channel, ctx->wifi_scan.ap_list[i].rssi);
-                    
-                    lv_obj_t *btn = lv_obj_get_child(scan_list, child_idx);
-                    if (!btn || lv_obj_get_child_cnt(btn) < 2) {
-                        if (btn) lv_obj_del(btn);
-                        btn = lv_list_add_btn(scan_list, LV_SYMBOL_WIFI, txt);
-                        if (btn) lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
-                    } else {
-                        lv_obj_t *label = lv_obj_get_child(btn, 1);
-                        if (label) lv_label_set_text(label, txt);
-                    }
-                    if (btn) lv_obj_set_user_data(btn, (void*)(intptr_t)i);
-                    child_idx++;
-                }
-            }
-            while (lv_obj_get_child_cnt(scan_list) > child_idx) {
-                lv_obj_del(lv_obj_get_child(scan_list, child_idx));
-            }
-        } else if (ctx->wifi_scan.view == VIEW_STA) {
-            uint32_t child_idx = 0;
-             for (int i = 0; i < ctx->wifi_scan.sta_count; i++) {
-                if (ctx->wifi_scan.sta_list[i].active) {
-                    char mac[18];
-                    sprintf(mac, "%02X:%02X:%02X:%02X:%02X:%02X", 
-                            ctx->wifi_scan.sta_list[i].mac[0], ctx->wifi_scan.sta_list[i].mac[1],
-                            ctx->wifi_scan.sta_list[i].mac[2], ctx->wifi_scan.sta_list[i].mac[3],
-                            ctx->wifi_scan.sta_list[i].mac[4], ctx->wifi_scan.sta_list[i].mac[5]);
-                    char txt[128];
-                    snprintf(txt, sizeof(txt), "%s (%ddBm)", mac, ctx->wifi_scan.sta_list[i].rssi);
-                    
-                    lv_obj_t *btn = lv_obj_get_child(scan_list, child_idx);
-                    if (!btn || lv_obj_get_child_cnt(btn) < 2) {
-                        if (btn) lv_obj_del(btn);
-                        btn = lv_list_add_btn(scan_list, LV_SYMBOL_BLUETOOTH, txt);
-                    } else {
-                        lv_obj_t *label = lv_obj_get_child(btn, 1);
-                        if (label) lv_label_set_text(label, txt);
-                    }
-                    if (btn) lv_obj_set_user_data(btn, (void*)(intptr_t)i);
-                    child_idx++;
-                }
-            }
-            while (lv_obj_get_child_cnt(scan_list) > child_idx) {
-                lv_obj_del(lv_obj_get_child(scan_list, child_idx));
-            }
-        } else if (ctx->wifi_scan.view == VIEW_LINKED) {
-            lv_obj_clean(scan_list); // Always clean for LINKED due to mixed obj types
-            bool found_any = false;
-            
-            for (int i = 0; i < ctx->wifi_scan.ap_count; i++) {
+            for (int i = 0; i < ctx->wifi_scan.ap_count && slot < MAX_SCAN_UI_ITEMS; i++) {
                 if (!ctx->wifi_scan.ap_list[i].active) continue;
-                
+
+                char txt[128];
+                snprintf(txt, sizeof(txt), "[%s] %s (Ch:%d, %ddBm)",
+                         enc_str(ctx->wifi_scan.ap_list[i].enc),
+                         ctx->wifi_scan.ap_list[i].ssid,
+                         ctx->wifi_scan.ap_list[i].channel,
+                         ctx->wifi_scan.ap_list[i].rssi);
+
+                set_item(slot, LV_SYMBOL_WIFI, txt, (intptr_t)i);
+                slot++;
+            }
+
+            // Hide unused slots
+            for (; slot < MAX_SCAN_UI_ITEMS; slot++) {
+                if (item_btns[slot]) {
+                    lv_obj_add_flag(item_btns[slot], LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_set_user_data(item_btns[slot], (void*)(intptr_t)-1);
+                }
+            }
+        }
+        else if (ctx->wifi_scan.view == VIEW_STA) {
+            for (int i = 0; i < ctx->wifi_scan.sta_count && slot < MAX_SCAN_UI_ITEMS; i++) {
+                if (!ctx->wifi_scan.sta_list[i].active) continue;
+
+                char mac[18];
+                sprintf(mac, "%02X:%02X:%02X:%02X:%02X:%02X",
+                        ctx->wifi_scan.sta_list[i].mac[0], ctx->wifi_scan.sta_list[i].mac[1],
+                        ctx->wifi_scan.sta_list[i].mac[2], ctx->wifi_scan.sta_list[i].mac[3],
+                        ctx->wifi_scan.sta_list[i].mac[4], ctx->wifi_scan.sta_list[i].mac[5]);
+
+                char txt[128];
+                snprintf(txt, sizeof(txt), "%s (%ddBm)", mac, ctx->wifi_scan.sta_list[i].rssi);
+
+                // No meaningful click action here, but keep callback harmless.
+                set_item(slot, LV_SYMBOL_BLUETOOTH, txt, (intptr_t)i);
+                slot++;
+            }
+
+            for (; slot < MAX_SCAN_UI_ITEMS; slot++) {
+                if (item_btns[slot]) {
+                    lv_obj_add_flag(item_btns[slot], LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_set_user_data(item_btns[slot], (void*)(intptr_t)-1);
+                }
+            }
+        }
+        else if (ctx->wifi_scan.view == VIEW_LINKED) {
+            bool found_any = false;
+
+            for (int i = 0; i < ctx->wifi_scan.ap_count && slot < MAX_SCAN_UI_ITEMS; i++) {
+                if (!ctx->wifi_scan.ap_list[i].active) continue;
+
                 bool has_linked_stas = false;
                 for (int j = 0; j < ctx->wifi_scan.sta_count; j++) {
-                    if (ctx->wifi_scan.sta_list[j].active && ctx->wifi_scan.sta_list[j].hasAP &&
-                        memcmp(ctx->wifi_scan.sta_list[j].apBssid, ctx->wifi_scan.ap_list[i].bssid, 6) == 0) {
+                    if (ctx->wifi_scan.sta_list[j].active &&
+                        ctx->wifi_scan.sta_list[j].hasAP &&
+                        memcmp(ctx->wifi_scan.sta_list[j].apBssid,
+                               ctx->wifi_scan.ap_list[i].bssid, 6) == 0) {
                         has_linked_stas = true;
                         break;
                     }
                 }
-                
-                if (has_linked_stas) {
+
+                if (!has_linked_stas) continue;
+
+                // AP header row
+                {
                     char txt[128];
                     snprintf(txt, sizeof(txt), "AP: %s", ctx->wifi_scan.ap_list[i].ssid);
-                    lv_list_add_text(scan_list, txt);
-                    
-                    for (int j = 0; j < ctx->wifi_scan.sta_count; j++) {
-                        if (ctx->wifi_scan.sta_list[j].active && ctx->wifi_scan.sta_list[j].hasAP &&
-                            memcmp(ctx->wifi_scan.sta_list[j].apBssid, ctx->wifi_scan.ap_list[i].bssid, 6) == 0) {
-                            
-                            char mac[18];
-                            mac_str(ctx->wifi_scan.sta_list[j].mac, mac);
-                            snprintf(txt, sizeof(txt), "  %s (%ddBm)", mac, ctx->wifi_scan.sta_list[j].rssi);
-                            
-                            lv_obj_t *btn = lv_list_add_btn(scan_list, LV_SYMBOL_RIGHT, txt);
-                            if (btn) {
-                                lv_obj_set_user_data(btn, (void*)(intptr_t)i); // Pass AP index for targeting
-                                lv_obj_add_event_cb(btn, cb_net_selected, LV_EVENT_CLICKED, nullptr);
-                                found_any = true;
-                            }
-                        }
+                    set_item(slot, LV_SYMBOL_WIFI, txt, (intptr_t)i);
+                    slot++;
+                    found_any = true;
+                    if (slot >= MAX_SCAN_UI_ITEMS) break;
+                }
+
+                // Child STA rows
+                for (int j = 0; j < ctx->wifi_scan.sta_count && slot < MAX_SCAN_UI_ITEMS; j++) {
+                    if (!(ctx->wifi_scan.sta_list[j].active &&
+                          ctx->wifi_scan.sta_list[j].hasAP &&
+                          memcmp(ctx->wifi_scan.sta_list[j].apBssid,
+                                 ctx->wifi_scan.ap_list[i].bssid, 6) == 0)) {
+                        continue;
                     }
+
+                    char mac[18];
+                    mac_str(ctx->wifi_scan.sta_list[j].mac, mac);
+
+                    char txt[128];
+                    snprintf(txt, sizeof(txt), "  %s (%ddBm)", mac, ctx->wifi_scan.sta_list[j].rssi);
+
+                    // Pass AP index for targeting, same as your old code.
+                    set_item(slot, LV_SYMBOL_RIGHT, txt, (intptr_t)i);
+                    slot++;
+                    found_any = true;
                 }
             }
-            
-            if (!found_any) {
-                lv_list_add_text(scan_list, "No associated clients found yet");
+
+            if (!found_any && slot < MAX_SCAN_UI_ITEMS) {
+                set_item(slot, LV_SYMBOL_WARNING, "No associated clients found yet", (intptr_t)-1);
+                slot++;
+            }
+
+            for (; slot < MAX_SCAN_UI_ITEMS; slot++) {
+                if (item_btns[slot]) {
+                    lv_obj_add_flag(item_btns[slot], LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_set_user_data(item_btns[slot], (void*)(intptr_t)-1);
+                }
             }
         }
 
@@ -201,11 +275,9 @@ void mac_str(const uint8_t *mac, char *out) {
 
 void scan_tick(lv_timer_t *timer) {
     uint32_t start = millis();
-    trace_enter("scan_tick");
     
     AppContext *ctx = (AppContext *)timer->user_data;
     if (!ctx || ctx->wifi_scan.paused) { 
-        trace_exit("scan_tick"); 
         if (millis() - start > 10) {
             Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)(millis() - start));
         }
@@ -224,7 +296,6 @@ void scan_tick(lv_timer_t *timer) {
     int16_t n = WiFi.scanComplete();
 
     if (n == WIFI_SCAN_RUNNING) {
-        trace_exit("scan_tick");
         if (millis() - start > 10) {
             Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)(millis() - start));
         }
@@ -265,7 +336,6 @@ void scan_tick(lv_timer_t *timer) {
         run_ap_scan(ctx);
         ctx->wifi_scan.last_scan_ms = millis();
     }
-    trace_exit("scan_tick");
     
     uint32_t dt = millis() - start;
     if (dt > 10) {

@@ -331,19 +331,20 @@ void process_ble_sniff_ui(AppContext* context) {
     BleState& ble = context->ble;
     uint32_t unique_size = 0;
     uint32_t pkt_count = 0;
-    String last_mac_str = "";
+    static char last_mac_str[18] = ""; // Fixed static buffer to completely eliminate String heap fragmentation
 
     if (ble_mutex && xSemaphoreTake(ble_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         // FIX 5: Proper ring buffer consumer
         while (ble.ring_tail != ble.ring_head) {
             uint8_t i = ble.ring_tail;
-            ble.last_mac = ble.ring_buf[i].mac; 
+            strncpy(last_mac_str, ble.ring_buf[i].mac, 17);
+            last_mac_str[17] = '\0';
+            ble.last_mac = last_mac_str; // For broader application context if used elsewhere
             if (sd_card_ready()) sd_log_ble_sniff(millis(), ble.ring_buf[i].mac, ble.ring_buf[i].rssi);
             ble.ring_tail = (ble.ring_tail + 1) % BLE_RING_SIZE;
         }
         unique_size = ble.unique_macs.size();
         pkt_count = ble.packet_count;
-        last_mac_str = ble.last_mac;
         xSemaphoreGive(ble_mutex);
     }
     
@@ -351,7 +352,7 @@ void process_ble_sniff_ui(AppContext* context) {
     if (millis() - last_ui < 1000) return;
     char buf[128];
     snprintf(buf, sizeof(buf), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
-             pkt_count, unique_size, last_mac_str.c_str());
+             pkt_count, unique_size, last_mac_str);
     queue_local_ui_text(UI_EVT_SET_BLE_STATUS, buf);
     last_ui = millis();
 }

@@ -92,7 +92,7 @@ void process_pcap_queue(AppContext* context) {
         context->sniffer.pcap_packet_count++;
         writes++;
 
-        if (writes >= 16) break;
+        if (writes >= 8) break;
         if (millis() - start_ms >= 10) break;
     }
 }
@@ -117,7 +117,7 @@ void process_probe_queue(AppContext* context) {
             }
         }
         
-        if (++processed >= 16) break;
+        if (++processed >= 8) break;
     }
 }
 
