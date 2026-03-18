@@ -1,5 +1,7 @@
 #pragma once
 
+#define FIRMWARE_VERSION "v1.0.0"
+
 // UI
 #define SCREEN_W 240
 #define SCREEN_H 320

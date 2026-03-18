@@ -52,6 +52,10 @@ lv_obj_t *diagnostics_panel = nullptr;
 lv_obj_t *ta_diagnostics = nullptr;
 lv_obj_t *sys_stats_panel = nullptr;
 lv_obj_t *ta_sys_stats = nullptr;
+lv_obj_t *about_panel = nullptr;
+lv_obj_t *lbl_firmware_version = nullptr;
+lv_obj_t *lbl_build_date = nullptr;
+lv_obj_t *lbl_device_id = nullptr;
 
 extern void toggle_web_server();
 extern void spoof_mac();
@@ -170,8 +174,14 @@ void ui_build() {
   tab_settings =lv_tabview_add_tab(tabview, "Settings");
   tab_lora    =lv_tabview_add_tab(tabview, "LoRa");
   tab_gps     =lv_tabview_add_tab(tabview, "GPS");
+  beacon_ssid_panel = lv_tabview_add_tab(tabview, "SSIDs"); // Index 9
+  diagnostics_panel = lv_tabview_add_tab(tabview, "Diag");  // Index 10
+  sys_stats_panel   = lv_tabview_add_tab(tabview, "Perf");  // Index 11
+  battery_stats_panel = lv_tabview_add_tab(tabview, "Batt"); // Index 12
+  about_panel       = lv_tabview_add_tab(tabview, "About"); // Index 13
   
-  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,tv_cont};
+  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps, // Main tabs
+                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, about_panel, tv_cont}; // Sub-tabs
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
@@ -210,6 +220,16 @@ void ui_build() {
     lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); lv_obj_add_style(btn, &style_btn_dark, 0); // Standardized position
     lv_obj_add_event_cb(btn, cb_nav_home, LV_EVENT_CLICKED, nullptr);
     lv_obj_t *l=lv_label_create(btn); lv_label_set_text(l,LV_SYMBOL_HOME " RETURN HOME");
+    lv_obj_center(l);
+  };
+
+  // Drill-down return to Settings helper
+  auto add_settings_back_btn=[](lv_obj_t *parent) {
+    lv_obj_t *btn=lv_btn_create(parent); 
+    lv_obj_set_size(btn, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
+    lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); lv_obj_add_style(btn, &style_btn_dark, 0);
+    lv_obj_add_event_cb(btn, [](lv_event_t*){ navigate_to(6); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *l=lv_label_create(btn); lv_label_set_text(l, LV_SYMBOL_LEFT " BACK TO SETTINGS");
     lv_obj_center(l);
   };
 
@@ -420,26 +440,30 @@ void ui_build() {
   lv_obj_set_style_pad_all(tab_settings, 6, 0);
 
   lv_obj_t *btn_open_beacon_ssids = make_atk_btn(tab_settings, LV_SYMBOL_EDIT " BEACON SSIDs", &style_btn_dark, 0xAAAAAA, [](lv_event_t *e) {
-      if (beacon_ssid_panel) lv_obj_clear_flag(beacon_ssid_panel, LV_OBJ_FLAG_HIDDEN); // Corrected y position
+      navigate_to(9); 
   }, UI::Layout::Padding);
   lv_obj_clear_flag(btn_open_beacon_ssids, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_t *btn_open_diag = make_atk_btn(tab_settings, LV_SYMBOL_SETTINGS " SYSTEM DIAGNOSTICS", &style_btn_dark, 0x00FFCC, [](lv_event_t *e) {
-      if (diagnostics_panel) lv_obj_clear_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
+      navigate_to(10);
   }, UI::Layout::Padding + UI::Layout::ButtonHeight + UI::Layout::Padding); // Corrected y position
   lv_obj_clear_flag(btn_open_diag, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_diag,0), lv_color_hex(UI::Colors::Primary), 0);
 
   lv_obj_t *btn_open_sys_stats = make_atk_btn(tab_settings, LV_SYMBOL_LIST " PERFORMANCE STATS", &style_btn_dark, 0xFFAA00, [](lv_event_t *e) {
-      if (sys_stats_panel) lv_obj_clear_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN);
+      navigate_to(11);
   }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 2); // Corrected y position
   lv_obj_clear_flag(btn_open_sys_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_sys_stats,0), lv_color_hex(UI::Colors::Warning), 0);
 
   lv_obj_t *btn_open_batt_stats = make_atk_btn(tab_settings, LV_SYMBOL_BATTERY_3 " BATTERY STATS", &style_btn_dark, 0x00FF88, [](lv_event_t *e) {
-      if (battery_stats_panel) lv_obj_clear_flag(battery_stats_panel, LV_OBJ_FLAG_HIDDEN);
+      navigate_to(12);
   }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 3); // Corrected y position
   lv_obj_clear_flag(btn_open_batt_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_batt_stats,0), lv_color_hex(UI::Colors::Success), 0);
 
   // Brightness Slider
+  lv_obj_t *lbl_br = lv_label_create(tab_settings);
+  lv_label_set_text(lbl_br, LV_SYMBOL_SETTINGS " SCREEN BRIGHTNESS");
+  lv_obj_align(lbl_br, LV_ALIGN_TOP_MID, 0, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 4);
+
   lv_obj_t *slider_bright = lv_slider_create(tab_settings);
   lv_obj_set_size(slider_bright, SCREEN_W - 60, 12);
   lv_obj_align(slider_bright, LV_ALIGN_TOP_MID, 0, 220);
@@ -449,21 +473,19 @@ void ui_build() {
       int v = lv_slider_get_value(lv_event_get_target(e));
       ledcWrite(TFT_BL, v); // Write directly to the pin in Core 3.x
   }, LV_EVENT_VALUE_CHANGED, nullptr);
-  lv_obj_t *lbl_br = lv_label_create(tab_settings);
-  lv_label_set_text(lbl_br, LV_SYMBOL_SETTINGS " SCREEN BRIGHTNESS");
-  lv_obj_align_to(lbl_br, slider_bright, LV_ALIGN_OUT_TOP_MID, 0, -5);
+
+  lv_obj_t *btn_open_about = make_atk_btn(tab_settings, LV_SYMBOL_DIRECTORY " ABOUT", &style_btn_dark, 0xAAAAAA, [](lv_event_t *e) {
+      navigate_to(13);
+  }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 5);
+  lv_obj_clear_flag(btn_open_about, LV_OBJ_FLAG_HIDDEN);
+
 
   add_return_btn(tab_settings);
 
-  // --- Beacon SSID Modal Panel ---
-  beacon_ssid_panel = lv_obj_create(main_screen);
-  lv_obj_set_size(beacon_ssid_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight);
-  lv_obj_align(beacon_ssid_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  // --- Beacon SSID Sub-Tab ---
   lv_obj_set_style_bg_color(beacon_ssid_panel, lv_color_hex(0x050505), 0);
   lv_obj_set_style_border_color(beacon_ssid_panel, lv_color_hex(0xAAAAAA), 0);
   lv_obj_set_style_border_width(beacon_ssid_panel, 2, 0);
-  lv_obj_add_flag(beacon_ssid_panel, LV_OBJ_FLAG_HIDDEN);
-  no_scroll(beacon_ssid_panel);
 
   lv_obj_t *lbl_beacon_title = lv_label_create(beacon_ssid_panel);
   lv_label_set_text(lbl_beacon_title, "#AAAAAA " LV_SYMBOL_EDIT " BEACON SSIDs#");
@@ -521,19 +543,14 @@ void ui_build() {
   lv_obj_align(btn_close_beacon, LV_ALIGN_BOTTOM_LEFT, UI::Layout::Margin, -UI::Layout::Padding);
   lv_obj_add_style(btn_close_beacon, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_beacon, [](lv_event_t *e) {
-      if (beacon_ssid_panel) lv_obj_add_flag(beacon_ssid_panel, LV_OBJ_FLAG_HIDDEN);
+      navigate_to(6);
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lbl_close_beacon = lv_label_create(btn_close_beacon); lv_label_set_text(lbl_close_beacon, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_beacon);
 
-  // --- Diagnostics Modal Panel ---
-  diagnostics_panel = lv_obj_create(main_screen);
-  lv_obj_set_size(diagnostics_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight);
-  lv_obj_align(diagnostics_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  // --- Diagnostics Sub-Tab ---
   lv_obj_set_style_bg_color(diagnostics_panel, lv_color_hex(UI::Colors::Background), 0);
   lv_obj_set_style_border_color(diagnostics_panel, lv_color_hex(UI::Colors::Primary), 0);
   lv_obj_set_style_border_width(diagnostics_panel, 2, 0);
-  lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
-  no_scroll(diagnostics_panel);
 
   lv_obj_t *lbl_diag_title = lv_label_create(diagnostics_panel);
   lv_label_set_text(lbl_diag_title, "#00FFCC " LV_SYMBOL_SETTINGS " SYSTEM DIAGNOSTICS#");
@@ -547,26 +564,12 @@ void ui_build() {
   lv_obj_clear_flag(ta_diagnostics, LV_OBJ_FLAG_CLICK_FOCUSABLE);
   lv_obj_set_style_text_font(ta_diagnostics, &lv_font_montserrat_14, 0);
 
-  lv_obj_t *btn_close_diag = lv_btn_create(diagnostics_panel);
-  lv_obj_set_size(btn_close_diag, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); // Standardized size
-  lv_obj_align(btn_close_diag, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); // Standardized position
-  lv_obj_set_size(btn_close_diag, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(btn_close_diag, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
-  lv_obj_add_style(btn_close_diag, &style_btn_dark, 0);
-  lv_obj_add_event_cb(btn_close_diag, [](lv_event_t *e) {
-      if (diagnostics_panel) lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
-  }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_close_diag = lv_label_create(btn_close_diag); lv_label_set_text(lbl_close_diag, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_diag);
+  add_settings_back_btn(diagnostics_panel);
 
-  // --- System Stats Modal Panel ---
-  sys_stats_panel = lv_obj_create(main_screen);
-  lv_obj_set_size(sys_stats_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight);
-  lv_obj_align(sys_stats_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  // --- System Stats Sub-Tab ---
   lv_obj_set_style_bg_color(sys_stats_panel, lv_color_hex(UI::Colors::Background), 0);
   lv_obj_set_style_border_color(sys_stats_panel, lv_color_hex(UI::Colors::Warning), 0);
   lv_obj_set_style_border_width(sys_stats_panel, 2, 0);
-  lv_obj_add_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN);
-  no_scroll(sys_stats_panel);
 
   lv_obj_t *lbl_stats_title2 = lv_label_create(sys_stats_panel);
   lv_label_set_text(lbl_stats_title2, "#FFAA00 " LV_SYMBOL_LIST " PERFORMANCE STATS#");
@@ -580,26 +583,12 @@ void ui_build() {
   lv_obj_clear_flag(ta_sys_stats, LV_OBJ_FLAG_CLICK_FOCUSABLE);
   lv_obj_set_style_text_font(ta_sys_stats, &lv_font_montserrat_14, 0);
 
-  lv_obj_t *btn_close_sys_stats = lv_btn_create(sys_stats_panel);
-  lv_obj_set_size(btn_close_sys_stats, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); // Standardized size
-  lv_obj_align(btn_close_sys_stats, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); // Standardized position
-  lv_obj_set_size(btn_close_sys_stats, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(btn_close_sys_stats, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
-  lv_obj_add_style(btn_close_sys_stats, &style_btn_dark, 0);
-  lv_obj_add_event_cb(btn_close_sys_stats, [](lv_event_t *e) {
-      if (sys_stats_panel) lv_obj_add_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN);
-  }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_close_sys_stats = lv_label_create(btn_close_sys_stats); lv_label_set_text(lbl_close_sys_stats, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_sys_stats);
+  add_settings_back_btn(sys_stats_panel);
 
-  // --- Battery Stats Modal Panel ---
-  battery_stats_panel = lv_obj_create(main_screen);
-  lv_obj_set_size(battery_stats_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight);
-  lv_obj_align(battery_stats_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  // --- Battery Stats Sub-Tab ---
   lv_obj_set_style_bg_color(battery_stats_panel, lv_color_hex(UI::Colors::Background), 0);
   lv_obj_set_style_border_color(battery_stats_panel, lv_color_hex(UI::Colors::Success), 0);
   lv_obj_set_style_border_width(battery_stats_panel, 2, 0);
-  lv_obj_add_flag(battery_stats_panel, LV_OBJ_FLAG_HIDDEN);
-  no_scroll(battery_stats_panel);
 
   lv_obj_t *lbl_batt_title = lv_label_create(battery_stats_panel);
   lv_label_set_text(lbl_batt_title, "#00FF88 " LV_SYMBOL_BATTERY_FULL " DETAILED POWER STATS#");
@@ -628,16 +617,45 @@ void ui_build() {
   ui_battery_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00FF88), LV_CHART_AXIS_PRIMARY_Y);
   ui_heap_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00AAFF), LV_CHART_AXIS_SECONDARY_Y);
 
-  lv_obj_t *btn_close_batt = lv_btn_create(battery_stats_panel);
-  lv_obj_set_size(btn_close_batt, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); // Standardized size
-  lv_obj_align(btn_close_batt, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); // Standardized position
-  lv_obj_set_size(btn_close_batt, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(btn_close_batt, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
-  lv_obj_add_style(btn_close_batt, &style_btn_dark, 0);
-  lv_obj_add_event_cb(btn_close_batt, [](lv_event_t *e) {
-      lv_obj_add_flag(battery_stats_panel, LV_OBJ_FLAG_HIDDEN);
-  }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_close_batt = lv_label_create(btn_close_batt); lv_label_set_text(lbl_close_batt, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_batt);
+  lv_obj_t *btn_reset_cal = lv_btn_create(battery_stats_panel);
+  lv_obj_set_size(btn_reset_cal, SCREEN_W - (UI::Layout::Margin * 2), 30);
+  lv_obj_align(btn_reset_cal, LV_ALIGN_BOTTOM_MID, 0, -45);
+  lv_obj_add_style(btn_reset_cal, &style_btn_dark, 0);
+  
+  lv_obj_add_event_cb(btn_reset_cal, [](lv_event_t *e) {
+      if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
+          extern void reset_battery_calibration();
+          reset_battery_calibration();
+          lv_label_set_text(lv_obj_get_child(e->target, 0), LV_SYMBOL_REFRESH " CALIBRATION CLEARED");
+      }
+  }, LV_EVENT_ALL, nullptr);
+  lv_obj_t *lbl_reset = lv_label_create(btn_reset_cal); lv_label_set_text(lbl_reset, "HOLD TO RESET CALIB"); lv_obj_center(lbl_reset);
+
+  add_settings_back_btn(battery_stats_panel);
+
+  // --- About Sub-Tab ---
+  lv_obj_set_style_bg_color(about_panel, lv_color_hex(UI::Colors::Background), 0);
+  lv_obj_set_style_border_color(about_panel, lv_color_hex(UI::Colors::Secondary), 0);
+  lv_obj_set_style_border_width(about_panel, 2, 0);
+
+  lv_obj_t *lbl_about_title = lv_label_create(about_panel);
+  lv_label_set_text(lbl_about_title, "#AAAAAA " LV_SYMBOL_DIRECTORY " ABOUT AUDITOR#");
+  lv_label_set_recolor(lbl_about_title, true);
+  lv_obj_align(lbl_about_title, LV_ALIGN_TOP_MID, 0, 0);
+
+  lbl_firmware_version = lv_label_create(about_panel);
+  lv_label_set_text(lbl_firmware_version, "Firmware: vX.X.X");
+  lv_obj_align(lbl_firmware_version, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 40);
+
+  lbl_build_date = lv_label_create(about_panel);
+  lv_label_set_text(lbl_build_date, "Build Date: YYYY-MM-DD");
+  lv_obj_align(lbl_build_date, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 60);
+
+  lbl_device_id = lv_label_create(about_panel);
+  lv_label_set_text(lbl_device_id, "Device ID: XX:XX:XX:XX:XX:XX");
+  lv_obj_align(lbl_device_id, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 80);
+
+  add_settings_back_btn(about_panel);
 
   // --- LoRa Stats Modal Panel ---
   lora_stats_panel = lv_obj_create(main_screen);

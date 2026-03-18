@@ -470,7 +470,7 @@ void ui_update_tick(lv_timer_t *timer) {
     }
 
     // Update Diagnostics Panel if visible
-    if (diagnostics_panel && !lv_obj_has_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN) && ta_diagnostics) {
+    if (tabview && lv_tabview_get_tab_act(tabview) == 10 && ta_diagnostics) {
         static uint32_t last_diag_draw = 0;
         if (millis() - last_diag_draw > 1000) {
             char c0[96], c1[96];
@@ -518,7 +518,7 @@ void ui_update_tick(lv_timer_t *timer) {
     }
 
     // Update Battery Detail Panel if visible
-    if (battery_stats_panel && !lv_obj_has_flag(battery_stats_panel, LV_OBJ_FLAG_HIDDEN) && lbl_battery_stats) {
+    if (tabview && lv_tabview_get_tab_act(tabview) == 12 && lbl_battery_stats) {
         static uint32_t last_batt_draw = 0;
         if (millis() - last_batt_draw > 500) {
             char buf[256];
@@ -526,13 +526,15 @@ void ui_update_tick(lv_timer_t *timer) {
                 "#00FF88 Power Rail Info#\n\n"
                 "#AAAAAA Voltage:#   #FFFFFF %.2f V#\n"
                 "#AAAAAA Capacity:#  #FFFFFF %d %%#\n"
-                "#AAAAAA Status:#    #FFFFFF %s#\n"
+                "#AAAAAA Status:#    #FFFFFF %s#\n\n"
+                "#AAAAAA Learned 100%%:# #00FF88 %.2f V#\n"
                 "#AAAAAA ADC Pin:#   #FFFFFF GPIO %d#\n"
                 "#AAAAAA V-Divider:# #FFFFFF 1:2 (100k)#\n\n"
-                "#AAAAAA Health:#    #00FF88 GOOD#",
+                "#AAAAAA Health:#    #00FF88 OPTIMAL#",
                 (float)ss.batteryMv / 1000.0f,
                 ss.batteryPct,
                 ss.isCharging ? "USB Connected (Charging)" : "On Battery",
+                (float)g_app_context.status.calibrated_max_mv / 1000.0f,
                 BATT_ADC);
             lv_label_set_text(lbl_battery_stats, buf);
             last_batt_draw = millis();
@@ -540,7 +542,7 @@ void ui_update_tick(lv_timer_t *timer) {
     }
 
     // Update System Stats Panel if visible
-    if (sys_stats_panel && !lv_obj_has_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN) && ta_sys_stats) {
+    if (tabview && lv_tabview_get_tab_act(tabview) == 11 && ta_sys_stats) {
         static uint32_t last_sys_stats_draw = 0;
         if (millis() - last_sys_stats_draw > 2000) { // Slower refresh for task stats stability
             char buf[1024]; // Increased buffer for task list

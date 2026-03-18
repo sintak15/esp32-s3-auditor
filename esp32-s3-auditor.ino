@@ -35,7 +35,7 @@
 #include "ble_tasks.h"
 #include "pcap_and_probes.h"
 #include "ui_events.h"
-
+#include "src/UIConfig.h" // For UI::Colors
 
 // ──────────────────────────────────────────────
 //               Global Context & Objects
@@ -59,6 +59,9 @@ extern lv_obj_t *lbl_audit_target;
 extern lv_obj_t *lbl_audit_bssid;
 extern lv_obj_t *lbl_audit_status;
 extern lv_obj_t *btn_stop_audit;
+extern lv_obj_t *lbl_firmware_version;
+extern lv_obj_t *lbl_build_date;
+extern lv_obj_t *lbl_device_id;
 extern lv_obj_t *tabview;
 
 // ──────────────────────────────────────────────
@@ -375,6 +378,26 @@ static void write_status_snapshot(bool sdMounted, int batteryPct, bool isChargin
     }
 }
 
+void reset_battery_calibration() {
+    nvs_handle_t nvs;
+    if (nvs_open("storage", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_erase_key(nvs, "batt_max");
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    g_app_context.status.calibrated_max_mv = 4050; // Reset to safe default
+}
+
+void load_battery_calibration() {
+    nvs_handle_t nvs;
+    g_app_context.status.calibrated_max_mv = 4050; // default
+    if (nvs_open("storage", NVS_READONLY, &nvs) == ESP_OK) {
+        uint32_t val;
+        if (nvs_get_u32(nvs, "batt_max", &val) == ESP_OK) g_app_context.status.calibrated_max_mv = val;
+        nvs_close(nvs);
+    }
+}
+
 void status_service_task(void *pv) {
     uint32_t sd_retry_ms = 0;
     static float filtered_mv = 0.0f;
@@ -383,6 +406,8 @@ void status_service_task(void *pv) {
     // Configure ADC attenuation for the full 0-3.1V range
     // On S3-CYD models, the battery pin is GPIO 1 (GPIO 4 is LCD_DC)
     analogSetAttenuation(ADC_11db);
+    
+    load_battery_calibration();
 
     for (;;) {
         // Use factory-calibrated millivolts reading with multi-sampling pre-filter
@@ -400,16 +425,30 @@ void status_service_task(void *pv) {
         }
 
         uint32_t mv = (uint32_t)filtered_mv;
+
+        // Learned Accuracy Logic:
+        // If we are charging and seeing a stable voltage higher than our current 100% mark, 
+        // but within sane Li-ion limits (4.0V - 4.4V), update the calibration.
+        if (mv > 4130 && mv < 4400) {
+            if (mv > g_app_context.status.calibrated_max_mv + 10) {
+                g_app_context.status.calibrated_max_mv = mv;
+                // Save to NVS
+                nvs_handle_t nvs;
+                if (nvs_open("storage", NVS_READWRITE, &nvs) == ESP_OK) {
+                    nvs_set_u32(nvs, "batt_max", mv);
+                    nvs_commit(nvs);
+                    nvs_close(nvs);
+                }
+            }
+        }
         
         // Calculate percentage locally with strict clamping to 0-100
-        // Li-ion: 3300mV (Empty/Shutdown) to 4050mV (Full)
-        // We set 100% at 4050mV to ensure the UI reaches 100% before the 
-        // charging threshold kicks in, preventing state "flicker".
-        int newBattPct = map(constrain(mv, 3300, 4050), 3300, 4050, 0, 100);
+        // Now uses the learned calibrated_max_mv for the 100% point.
+        uint32_t max_v = g_app_context.status.calibrated_max_mv;
+        int newBattPct = map(constrain(mv, 3300, max_v), 3300, max_v, 0, 100);
         
         // Heuristic: If reading is above 4130mV on a 1S battery, it's physically 
         // impossible unless a charger is applying 5V to the rail.
-        // This value is chosen to be above the 100% threshold (4050mV) but below the typical 4.2V+ charging voltage.
         bool charging = (mv > 4130);
 
         if (!sd_card_ready() && millis() - sd_retry_ms > 5000) {
@@ -1275,9 +1314,10 @@ void setup() {
     g_app_context.ui_task_handle = nullptr;
 
     g_app_context.web_server_active = false;
+    g_app_context.device_id = WiFi.macAddress(); // Store device MAC address
     g_app_context.ui_busy = false;
     
-    write_status_snapshot(sd_card_ready(), 100, false, 4200); // Corrected to use g_app_context
+    write_status_snapshot(sd_card_ready(), 100, false, 4200); // Corrected argument count
 
     // Initialize modules
     wifi_scanner_init(&g_app_context);

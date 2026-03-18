@@ -152,6 +152,7 @@ struct BleState {
 struct StatusState {
   StatusSnapshot snap;
   SemaphoreHandle_t mutex;
+  uint32_t calibrated_max_mv; // The learned 100% voltage point
   TaskHandle_t service_task; // Added for Status service task handle
 };
 
@@ -216,6 +217,7 @@ struct AppContext {
   TaskHandle_t main_task_handle;
   TaskHandle_t wifi_task_handle;
   TaskHandle_t ui_task_handle;
+  String device_id; // Stores the unique device ID (e.g., MAC address)
 };
 
 // Global AppContext instance (needs to be defined in the main .ino file)
