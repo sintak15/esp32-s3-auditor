@@ -12,7 +12,7 @@ extern AppContext g_app_context;
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
 lv_obj_t *lbl_sd, *lbl_wifi, *lbl_batt, *lbl_batt_pct, *lbl_msg;
-lv_obj_t *tab_home, *tab_scan, *tab_audit, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora, *tab_gps; // Consolidated tab declarations
+lv_obj_t *tab_home, *tab_scan, *tab_audit, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora, *tab_gps; 
 lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
 lv_obj_t *lbl_audit_target, *lbl_audit_bssid, *lbl_audit_status;
@@ -267,36 +267,36 @@ void ui_build() {
   lv_obj_center(lbl_scan_pause);
 
   // ── Audit Tab ───────────────────────────────────
-  lv_obj_set_style_pad_all(tab_audit,6,0);
-  lbl_audit_target=lv_label_create(tab_audit);
-  lv_label_set_recolor(lbl_audit_target,true);
-  lv_label_set_text(lbl_audit_target,"#888888 Select a target from SCAN#");
-  lv_obj_set_width(lbl_audit_target,SCREEN_W-20);
+  lv_obj_set_style_pad_all(tab_audit, 6, 0);
+  lbl_audit_target = lv_label_create(tab_audit);
+  lv_label_set_recolor(lbl_audit_target, true);
+  lv_label_set_text(lbl_audit_target, "#888888 Select a target from SCAN#");
+  lv_obj_set_width(lbl_audit_target, SCREEN_W - 20);
   // FIX: SCROLL_CIRCULAR runs an infinite animation timer that invalidates the screen even when idle
-  lv_label_set_long_mode(lbl_audit_target,LV_LABEL_LONG_DOT);
-  lv_obj_align(lbl_audit_target,LV_ALIGN_TOP_MID,0,2);
-  lbl_audit_bssid=lv_label_create(tab_audit);
-  lv_obj_set_style_text_color(lbl_audit_bssid,lv_color_hex(0x555555),0);
-  lv_obj_set_style_text_font(lbl_audit_bssid,&lv_font_montserrat_14,0);
-  lv_label_set_text(lbl_audit_bssid,"---");
+  lv_label_set_long_mode(lbl_audit_target, LV_LABEL_LONG_DOT);
+  lv_obj_align(lbl_audit_target, LV_ALIGN_TOP_MID, 0, 2);
+  lbl_audit_bssid = lv_label_create(tab_audit);
+  lv_obj_set_style_text_color(lbl_audit_bssid, lv_color_hex(0x555555), 0);
+  lv_obj_set_style_text_font(lbl_audit_bssid, &lv_font_montserrat_14, 0);
+  lv_label_set_text(lbl_audit_bssid, "---");
   // Prevent scrolling label from cascading full-screen redraws:
-  lv_obj_align(lbl_audit_bssid,LV_ALIGN_TOP_MID,0,24);
-  lbl_audit_status=lv_label_create(tab_audit);
-  lv_label_set_recolor(lbl_audit_status,true);
-  lv_obj_set_style_text_font(lbl_audit_status,&lv_font_montserrat_14,0);
-  lv_label_set_text(lbl_audit_status,"#444444 IDLE#");
-  lv_obj_set_width(lbl_audit_status,SCREEN_W-20);
-  lv_obj_align(lbl_audit_status,LV_ALIGN_TOP_MID,0,42);
+  lv_obj_align(lbl_audit_bssid, LV_ALIGN_TOP_MID, 0, 24);
+  lbl_audit_status = lv_label_create(tab_audit);
+  lv_label_set_recolor(lbl_audit_status, true);
+  lv_obj_set_style_text_font(lbl_audit_status, &lv_font_montserrat_14, 0);
+  lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
+  lv_obj_set_width(lbl_audit_status, SCREEN_W - 20);
+  lv_obj_align(lbl_audit_status, LV_ALIGN_TOP_MID, 0, 42);
   int y=62;
-  btn_deauth=make_atk_btn(tab_audit,LV_SYMBOL_WARNING   " DEAUTH TEST",   &style_btn_red,   0xFF4444,cb_start_deauth,y); y+=42;
-  btn_beacon=make_atk_btn(tab_audit,LV_SYMBOL_AUDIO     " BEACON FLOOD",  &style_btn_orange,0xFFAA00,cb_start_beacon,y); y+=42;
-  btn_pmkid =make_atk_btn(tab_audit,LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE",&style_btn_blue,  0x00AAFF,cb_start_pmkid, y);
-  btn_stop_audit=lv_btn_create(tab_audit);
-  lv_obj_set_size(btn_stop_audit,SCREEN_W-20,38); lv_obj_align(btn_stop_audit,LV_ALIGN_BOTTOM_MID,0,-52);
-  lv_obj_set_style_bg_color(btn_stop_audit,lv_color_hex(0x1A0000),0);
-  lv_obj_set_style_border_color(btn_stop_audit,lv_color_hex(0xFF0000),0);
-  lv_obj_set_style_border_width(btn_stop_audit,2,0);
-  lv_obj_add_event_cb(btn_stop_audit,cb_stop_pentest,LV_EVENT_CLICKED,nullptr);
+  btn_deauth = make_atk_btn(tab_audit, LV_SYMBOL_WARNING   " DEAUTH TEST",   &style_btn_red,   0xFF4444, cb_start_deauth, y); y += 42;
+  btn_beacon = make_atk_btn(tab_audit, LV_SYMBOL_AUDIO     " BEACON FLOOD",  &style_btn_orange, 0xFFAA00, cb_start_beacon, y); y += 42;
+  btn_pmkid = make_atk_btn(tab_audit, LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE", &style_btn_blue,  0x00AAFF, cb_start_pmkid, y);
+  btn_stop_audit = lv_btn_create(tab_audit);
+  lv_obj_set_size(btn_stop_audit, SCREEN_W - 20, 38); lv_obj_align(btn_stop_audit, LV_ALIGN_BOTTOM_MID, 0, -52);
+  lv_obj_set_style_bg_color(btn_stop_audit, lv_color_hex(0x1A0000), 0);
+  lv_obj_set_style_border_color(btn_stop_audit, lv_color_hex(0xFF0000), 0);
+  lv_obj_set_style_border_width(btn_stop_audit, 2, 0);
+  lv_obj_add_event_cb(btn_stop_audit, cb_stop_pentest, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *sl2=lv_label_create(btn_stop_audit); lv_label_set_text(sl2,LV_SYMBOL_STOP " STOP");
   lv_obj_set_style_text_color(sl2,lv_color_hex(0xFF0000),0); lv_obj_center(sl2);
   lv_obj_add_flag(btn_stop_audit,LV_OBJ_FLAG_HIDDEN);
@@ -447,15 +447,15 @@ void ui_build() {
   lv_textarea_set_one_line(ta_beacon_ssids, false);
   lv_obj_add_event_cb(ta_beacon_ssids, [](lv_event_t *e) {
     const char* text = lv_textarea_get_text(ta_beacon_ssids);
-    g_app_context.pentest.custom_beacon_ssids.clear();
+    g_app_context.audit.custom_beacon_ssids.clear();
     
     char current_ssid[MAX_BEACON_SSID_LENGTH + 1] = {0};
     int idx = 0;
     for (int i = 0; text[i] != '\0'; ++i) {
       if (text[i] == '\n') {
         if (idx > 0) {
-          if (g_app_context.pentest.custom_beacon_ssids.size() < MAX_BEACON_SSIDS) {
-            g_app_context.pentest.custom_beacon_ssids.push_back(String(current_ssid));
+          if (g_app_context.audit.custom_beacon_ssids.size() < MAX_BEACON_SSIDS) {
+            g_app_context.audit.custom_beacon_ssids.push_back(String(current_ssid));
           }
         }
         idx = 0;
@@ -464,13 +464,13 @@ void ui_build() {
         if (idx < MAX_BEACON_SSID_LENGTH) current_ssid[idx++] = text[i];
       }
     }
-    if (idx > 0 && g_app_context.pentest.custom_beacon_ssids.size() < MAX_BEACON_SSIDS) {
-      g_app_context.pentest.custom_beacon_ssids.push_back(String(current_ssid));
+    if (idx > 0 && g_app_context.audit.custom_beacon_ssids.size() < MAX_BEACON_SSIDS) {
+      g_app_context.audit.custom_beacon_ssids.push_back(String(current_ssid));
     }
   }, LV_EVENT_VALUE_CHANGED, nullptr);
 
   String all_ssids = "";
-  for (const String& ssid : g_app_context.pentest.custom_beacon_ssids) {
+  for (const String& ssid : g_app_context.audit.custom_beacon_ssids) {
     all_ssids += ssid + "\n";
   }
   lv_textarea_set_text(ta_beacon_ssids, all_ssids.c_str());

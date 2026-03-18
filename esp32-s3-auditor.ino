@@ -55,6 +55,10 @@ extern lv_obj_t *btn_ble_sniff;
 extern lv_obj_t *btn_pcap_start;
 extern lv_obj_t *btn_probe_start;
 extern lv_obj_t *lbl_scan_pause;
+extern lv_obj_t *lbl_audit_target;
+extern lv_obj_t *lbl_audit_bssid;
+extern lv_obj_t *lbl_audit_status;
+extern lv_obj_t *btn_stop_audit;
 extern lv_obj_t *tabview;
 
 // ──────────────────────────────────────────────
@@ -378,21 +382,30 @@ static void write_status_snapshot(bool sdMounted, int batteryPct, bool isChargin
 
 void status_service_task(void *pv) {
     uint32_t sd_retry_ms = 0;
+    static float filtered_mv = 0.0f;
+    const float alpha = 0.15f; // Smoothing factor (0.0 to 1.0). Lower is smoother.
 
     for (;;) {
-        // Use analogReadMilliVolts for factory-calibrated accuracy on S3
-        // Multi-sample to eliminate noise flicker in the UI
-        uint32_t avg_mv = 0;
-        for(int i=0; i<10; i++) avg_mv += analogReadMilliVolts(BATT_ADC);
-        uint32_t mv = (avg_mv / 10) * 2; // ADC is on a 1:2 divider
+        // Use factory-calibrated millivolts reading with multi-sampling pre-filter
+        uint32_t raw_sum = 0;
+        for(int i=0; i<10; i++) raw_sum += analogReadMilliVolts(BATT_ADC);
+        uint32_t raw_mv = (raw_sum / 10) * 2; // ADC is on a 1:2 divider
 
+        // Exponential Moving Average (EMA) low-pass filter to prevent flickering
+        if (filtered_mv == 0.0f) {
+            filtered_mv = (float)raw_mv;
+        } else {
+            filtered_mv = (alpha * (float)raw_mv) + ((1.0f - alpha) * filtered_mv);
+        }
+
+        uint32_t mv = (uint32_t)filtered_mv;
         int newBattPct = MeshUtils::mvoltsToPct(mv);
         bool charging = MeshUtils::isHardwareCharging(mv);
 
         if (!sd_card_ready() && millis() - sd_retry_ms > 5000) {
             if (!g_app_context.sniffer.pcap_active && 
                 !g_app_context.sniffer.probe_active && 
-                g_app_context.pentest.current_mode == PT_NONE && 
+                g_app_context.audit.current_mode == AUDIT_NONE && 
                 !g_app_context.ble.sniff_active) {
                 sd_retry_ms = millis();
                 sd_reinit();
@@ -812,58 +825,58 @@ void cb_view_linked(lv_event_t*) {
 void cb_start_deauth(lv_event_t*) {
     // Corrected access to selected_net and deauth_sta_target
     if (g_app_context.wifi_scan.selected_net < 0 && g_app_context.wifi_scan.deauth_sta_target < 0) return;
-    if (g_app_context.pentest.current_mode != PT_NONE) stop_pentest(&g_app_context);
+    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_pentest(&g_app_context);
     
     if (g_app_context.wifi_scan.selected_net >= 0) { // Corrected access
         set_promiscuous_channel(g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].channel); // Corrected access
     }
-    g_app_context.pentest.current_mode = PT_DEAUTH;
-    g_app_context.pentest.pentest_timer = lv_timer_create(deauth_tick, 50, &g_app_context);
+    g_app_context.audit.current_mode = AUDIT_DEAUTH;
+    g_app_context.audit.audit_timer = lv_timer_create(deauth_tick, 50, &g_app_context);
     
     if (g_app_context.wifi_scan.deauth_sta_target >= 0 && g_app_context.wifi_scan.deauth_sta_target < g_app_context.wifi_scan.sta_count) { // Corrected access
         char sm[18];
-        mac_str(g_app_context.wifi_scan.sta_list[g_app_context.wifi_scan.deauth_sta_target].mac, sm); // Corrected access
-        lv_label_set_text_fmt(lbl_pt_status, "#FF4444 DEAUTH ACTIVE#\nTarget: %s", sm);
+        mac_str(g_app_context.wifi_scan.sta_list[g_app_context.wifi_scan.deauth_sta_target].mac, sm);
+        lv_label_set_text_fmt(lbl_audit_status, "#FF4444 DEAUTH ACTIVE#\nTarget: %s", sm);
     } else {
-        lv_label_set_text_fmt(lbl_pt_status, "#FF4444 DEAUTH ACTIVE#\nBroadcast: %.16s", g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].ssid); // Corrected access
+        lv_label_set_text_fmt(lbl_audit_status, "#FF4444 DEAUTH ACTIVE#\nBroadcast: %.16s", g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].ssid);
     }
     lv_obj_add_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(btn_stop_pt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
 
 void cb_start_beacon(lv_event_t*) {
-    if (g_app_context.pentest.current_mode != PT_NONE) stop_pentest(&g_app_context);
+    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_pentest(&g_app_context);
     set_promiscuous_channel(1);
-    g_app_context.pentest.current_mode = PT_BEACON;
-    g_app_context.pentest.beacon_idx = 0;
-    g_app_context.pentest.pentest_timer = lv_timer_create(beacon_tick, 100, &g_app_context);
-    lv_label_set_text(lbl_pt_status, "#FFAA00 BEACON FLOOD ACTIVE#");
+    g_app_context.audit.current_mode = AUDIT_BEACON;
+    g_app_context.audit.beacon_idx = 0;
+    g_app_context.audit.audit_timer = lv_timer_create(beacon_tick, 100, &g_app_context);
+    lv_label_set_text(lbl_audit_status, "#FFAA00 BEACON FLOOD ACTIVE#");
     lv_obj_add_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(btn_stop_pt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
 
 void cb_start_pmkid(lv_event_t*) {
     if (g_app_context.wifi_scan.selected_net < 0) return; // Corrected access
     if (g_app_context.sniffer.pcap_active || g_app_context.sniffer.probe_active) {
-        lv_label_set_text(lbl_pt_status, "#FF4444 Stop PCAP/Probes first#");
+        lv_label_set_text(lbl_audit_status, "#FF4444 Stop PCAP/Probes first#");
         return;
     }
-    if (g_app_context.pentest.current_mode != PT_NONE) stop_pentest(&g_app_context);
-    g_app_context.pentest.pmkid_found = false;
-    memcpy(g_app_context.pentest.pmkid_target_bssid, g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].bssid, 6); // Corrected access
+    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_pentest(&g_app_context);
+    g_app_context.audit.pmkid_found = false;
+    memcpy(g_app_context.audit.pmkid_target_bssid, g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].bssid, 6); // Corrected access
     set_promiscuous_channel(g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].channel); // Corrected access
     esp_wifi_set_promiscuous_rx_cb(pmkid_sniffer_cb);
-    g_app_context.pentest.current_mode = PT_PMKID;
-    g_app_context.pentest.pentest_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
-    lv_label_set_text(lbl_pt_status, "#00AAFF PMKID SNIFFING...#\nWaiting for handshake");
+    g_app_context.audit.current_mode = AUDIT_PMKID;
+    g_app_context.audit.audit_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
+    lv_label_set_text(lbl_audit_status, "#00AAFF PMKID SNIFFING...#\nWaiting for handshake");
     lv_obj_add_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(btn_stop_pt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
 
 void cb_stop_pentest(lv_event_t*) { stop_pentest(&g_app_context); }
@@ -1217,11 +1230,11 @@ void setup() {
     g_app_context.wifi_scan.deauth_sta_target = -1;
     g_app_context.wifi_scan.started = false;
     g_app_context.wifi_scan.scan_timer = nullptr;
-    g_app_context.pentest.current_mode = PT_NONE;
-    g_app_context.pentest.pentest_timer = nullptr;
-    g_app_context.pentest.beacon_idx = 0;
-    g_app_context.pentest.pmkid_found = false;
-    memset(g_app_context.pentest.pmkid_target_bssid, 0, 6);
+    g_app_context.audit.current_mode = AUDIT_NONE;
+    g_app_context.audit.audit_timer = nullptr;
+    g_app_context.audit.beacon_idx = 0;
+    g_app_context.audit.pmkid_found = false;
+    memset(g_app_context.audit.pmkid_target_bssid, 0, 6);
     g_app_context.sniffer.pcap_active = false;
     g_app_context.sniffer.probe_active = false;
     g_app_context.sniffer.pcap_queue = nullptr;
@@ -1263,11 +1276,11 @@ void setup() {
     pcap_and_probes_init(&g_app_context);
     
     load_beacon_ssids_from_nvs(&g_app_context); // Load custom SSIDs from NVS
-    if (g_app_context.pentest.custom_beacon_ssids.empty()) {
+    if (g_app_context.audit.custom_beacon_ssids.empty()) {
         // Add some default beacon SSIDs if NVS is empty
-        g_app_context.pentest.custom_beacon_ssids.push_back("Free WiFi");
-        g_app_context.pentest.custom_beacon_ssids.push_back("Guest Network");
-        g_app_context.pentest.custom_beacon_ssids.push_back("FBI Surveillance Van");
+        g_app_context.audit.custom_beacon_ssids.push_back("Free WiFi");
+        g_app_context.audit.custom_beacon_ssids.push_back("Guest Network");
+        g_app_context.audit.custom_beacon_ssids.push_back("FBI Surveillance Van");
     }
 
     xTaskCreatePinnedToCore(status_service_task, "status_task", 4096, NULL, 1, &g_app_context.status.service_task, 0);

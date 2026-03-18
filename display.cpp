@@ -530,7 +530,7 @@ void ui_update_tick(lv_timer_t *timer) {
     if (ui_spinner) {
         bool is_active = (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active || 
                           ui_context->ble.sniff_active || ui_context->ble.flood_active || 
-                          ui_context->pentest.current_mode != PT_NONE);
+                          ui_context->audit.current_mode != AUDIT_NONE);
         static int last_is_active = -1;
         if ((int)is_active != last_is_active) {
             // FIX: Hidden spinners STILL run animation timers and invalidate the screen. 

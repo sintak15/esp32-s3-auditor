@@ -105,10 +105,10 @@ struct ScanState {
   SemaphoreHandle_t mutex; // Added for thread-safe access to ap_list/sta_list
 };
 
-// Define PentestState
-struct PentestState {
-  PentestMode current_mode;
-  lv_timer_t* pentest_timer;
+// Define AuditState
+struct AuditState {
+  AuditMode current_mode;
+  lv_timer_t* audit_timer;
   int beacon_idx;
   bool pmkid_found;
   uint8_t pmkid_target_bssid[6]; // Used in pentest_attacks.cpp
@@ -203,7 +203,7 @@ struct GpsState {
 // Main AppContext
 struct AppContext {
   ScanState wifi_scan;
-  PentestState pentest;
+  AuditState audit;
   SnifferState sniffer;
   BleState ble;
   StatusState status;
