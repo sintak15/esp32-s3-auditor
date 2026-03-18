@@ -189,6 +189,17 @@ struct LoraState {
   std::vector<NodeRecord, PsramAllocator<NodeRecord>> known_nodes;
 };
 
+// Define GpsState
+struct GpsState {
+  double latitude;
+  double longitude;
+  int32_t altitude;
+  uint32_t sats_in_view;
+  uint32_t fix_quality;
+  uint32_t last_update_ms;
+  bool valid;
+};
+
 // Main AppContext
 struct AppContext {
   ScanState wifi_scan;
@@ -197,8 +208,12 @@ struct AppContext {
   BleState ble;
   StatusState status;
   LoraState lora;
+  GpsState gps;
   bool ui_busy; // Used in wifi_scanner.cpp
   bool web_server_active;
+  TaskHandle_t main_task_handle;
+  TaskHandle_t wifi_task_handle;
+  TaskHandle_t ui_task_handle;
 };
 
 // Global AppContext instance (needs to be defined in the main .ino file)

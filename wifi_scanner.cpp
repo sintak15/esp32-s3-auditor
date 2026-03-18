@@ -274,6 +274,8 @@ void mac_str(const uint8_t *mac, char *out) {
 }
 
 void scan_tick(lv_timer_t *timer) {
+    static uint8_t phase = 0;
+    static bool ui_scan_dirty = false;
     uint32_t start = millis();
     
     AppContext *ctx = (AppContext *)timer->user_data;
@@ -284,59 +286,64 @@ void scan_tick(lv_timer_t *timer) {
         return; 
     }
 
-    if (deferred_render) {
-        lv_indev_t * indev = lv_indev_get_next(NULL);
-        bool is_scrolling = scan_list ? lv_obj_is_scrolling(scan_list) : false;
-        if ((!indev || indev->proc.state == LV_INDEV_STATE_REL) && !is_scrolling) {
-            render_scan_list(ctx);
-        }
-    }
-
-    // Check if scan is complete
-    int16_t n = WiFi.scanComplete();
-
-    if (n == WIFI_SCAN_RUNNING) {
-        if (millis() - start > 10) {
-            Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)(millis() - start));
-        }
-        return; // Wait for the current scan to finish to prevent driver panic
-    }
-
-    if (n >= 0) { // Scan finished successfully
-        if (ctx->wifi_scan.mutex && xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-            ctx->wifi_scan.ap_count = 0;
-            for (int i = 0; i < n && i < MAX_APS; i++) {
-                APRecord &r = ctx->wifi_scan.ap_list[i];
-                strncpy(r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
-                r.ssid[sizeof(r.ssid) - 1] = '\0';
-                memcpy(r.bssid, WiFi.BSSID(i), 6);
-                r.rssi = WiFi.RSSI(i);
-                r.channel = WiFi.channel(i);
-                r.enc = WiFi.encryptionType(i);
-                r.active = true;
-                ctx->wifi_scan.ap_count++;
+    switch (phase) {
+        case 0: {
+            int16_t n = WiFi.scanComplete();
+            if (n == WIFI_SCAN_RUNNING) break;
+            
+            if (n >= 0) { // Scan finished successfully
+                if (ctx->wifi_scan.mutex && xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    ctx->wifi_scan.ap_count = 0;
+                    for (int i = 0; i < n && i < MAX_APS; i++) {
+                        APRecord &r = ctx->wifi_scan.ap_list[i];
+                        strncpy(r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
+                        r.ssid[sizeof(r.ssid) - 1] = '\0';
+                        memcpy(r.bssid, WiFi.BSSID(i), 6);
+                        r.rssi = WiFi.RSSI(i);
+                        r.channel = WiFi.channel(i);
+                        r.enc = WiFi.encryptionType(i);
+                        r.active = true;
+                        ctx->wifi_scan.ap_count++;
+                    }
+                    xSemaphoreGive(ctx->wifi_scan.mutex);
+                }
+                WiFi.scanDelete();
+                ui_scan_dirty = true;
+                
+                if (!ctx->wifi_scan.paused) {
+                    esp_wifi_set_promiscuous(true);
+                }
+            } else if (n == WIFI_SCAN_FAILED) {
+                WiFi.scanDelete();
             }
-            xSemaphoreGive(ctx->wifi_scan.mutex);
-        }
-        WiFi.scanDelete();
-        render_scan_list(ctx);
-        
-        // Re-enable promiscuous mode after AP scan is fully processed to allow STA sniffing
-        if (!ctx->wifi_scan.paused) {
-            esp_wifi_set_promiscuous(true);
-        }
-    }
-    else if (n == WIFI_SCAN_FAILED) {
-        // Reset the scanner if it failed so it can try again cleanly
-        WiFi.scanDelete();
-    }
 
-    // Only start a new scan if enough time has passed and we aren't already scanning
-    if (millis() - ctx->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS) {
-        run_ap_scan(ctx);
-        ctx->wifi_scan.last_scan_ms = millis();
+            if (millis() - ctx->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS) {
+                run_ap_scan(ctx);
+                ctx->wifi_scan.last_scan_ms = millis();
+            }
+            break;
+        }
+        case 1:
+            if (deferred_render) {
+                ui_scan_dirty = true;
+            }
+            break;
+        case 2:
+            if (ui_scan_dirty) {
+                lv_indev_t * indev = lv_indev_get_next(NULL);
+                bool is_scrolling = scan_list ? lv_obj_is_scrolling(scan_list) : false;
+                if ((!indev || indev->proc.state == LV_INDEV_STATE_REL) && !is_scrolling) {
+                    render_scan_list(ctx);
+                    ui_scan_dirty = false;
+                } else {
+                    deferred_render = true; // Try again next time
+                }
+            }
+            break;
     }
     
+    phase = (phase + 1) % 3;
+
     uint32_t dt = millis() - start;
     if (dt > 10) {
         Serial.printf("[DIAG] slow: scan_tick %lu ms\n", (unsigned long)dt);

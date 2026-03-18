@@ -43,6 +43,29 @@ static bool ble_switch_allowed(uint32_t cooldown = 500) {
 static NimBLEAdvertisementData g_adv_data;
 static bool g_adv_initialized = false;
 
+// FIX 3: Harden BLE startup against null-pointer crashes
+static bool g_bleHostInit = false;
+
+static bool ensure_ble_host_ready() {
+    if (g_bleHostInit) return true;
+    if (!ble_mutex) return false;
+    if (xSemaphoreTake(ble_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return false;
+    if (!g_bleHostInit) {
+        try {
+            NimBLEDevice::init("");
+            NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+            NimBLEDevice::setMTU(23);                // minimum MTU
+            g_bleHostInit = true;
+            Serial.printf("[BLE] host init ok, heap=%u\n", ESP.getFreeHeap());
+        } catch (...) {
+            Serial.println("[BLE] host init exception");
+            g_bleHostInit = false;
+        }
+    }
+    xSemaphoreGive(ble_mutex);
+    return g_bleHostInit;
+}
+
 // FIX 4: Low Memory Bailout Helper
 static bool ble_low_mem() {
     return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 20000;
@@ -118,9 +141,26 @@ static void internal_stop_ble(AppContext* context) {
 
 static void internal_start_ble_sniff(AppContext* context) {
     diag_ble_state("internal_start_ble_sniff:enter", context);
+    
+    Serial.printf("[BLE] start request: scanner=%p adv=%p cb=%p heap=%u sniff=%d flood=%d busy=%d ready=%d\n",
+                  (void*)context->ble.scanner,
+                  (void*)NimBLEDevice::getAdvertising(),
+                  (void*)ble_sniffer_cb_instance,
+                  ESP.getFreeHeap(),
+                  context->ble.sniff_active,
+                  context->ble.flood_active,
+                  context->ble.busy,
+                  context->ble.nimble_ready);
+                  
     context->ble.busy = true;
 
     if (context->ble.flood_active) internal_stop_ble(context);
+
+    if (!ensure_ble_host_ready()) {
+        Serial.println("[BLE] host not ready");
+        context->ble.busy = false;
+        return;
+    }
 
     context->wifi_scan.paused = true;
     esp_wifi_set_promiscuous(false);
@@ -131,18 +171,24 @@ static void internal_start_ble_sniff(AppContext* context) {
     }
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    if (!context->ble.nimble_ready) {
-        NimBLEDevice::setPower(ESP_PWR_LVL_N0);  // lower power
-        NimBLEDevice::setMTU(23);                // minimum MTU
-        NimBLEDevice::init("");
-        context->ble.nimble_ready = true;
+    NimBLEScan* scanner = NimBLEDevice::getScan();
+    if (scanner == nullptr) {
+        Serial.println("[BLE] getScan returned null");
+        context->ble.busy = false;
+        return;
     }
-    context->ble.scanner = NimBLEDevice::getScan();
-    context->ble.scanner->setScanCallbacks(ble_sniffer_cb_instance, true);
-    context->ble.scanner->setActiveScan(false); // Reduce memory & CPU load
-    context->ble.scanner->setInterval(400);     // Soften scan duty
-    context->ble.scanner->setWindow(40);
-    context->ble.scanner->start(0, false, true);
+    context->ble.scanner = scanner;
+
+    scanner->stop();
+    scanner->clearResults();
+
+    if (ble_sniffer_cb_instance) {
+        scanner->setScanCallbacks(ble_sniffer_cb_instance, true);
+    }
+    scanner->setActiveScan(false); // Reduce memory & CPU load
+    scanner->setInterval(400);     // Soften scan duty
+    scanner->setWindow(40);
+    scanner->start(0, false, true);
 
     if (ble_mutex && xSemaphoreTake(ble_mutex, portMAX_DELAY) == pdTRUE) {
         context->ble.unique_macs.clear();
@@ -174,13 +220,10 @@ static void internal_start_ble_flood(AppContext* context) {
         WiFi.disconnect(true);
     }
 
-    // Init NimBLE once here — process_ble_flood will reuse it each cycle
-    // rather than deinit/reinit every 300ms (which causes PC=0x0 crash)
-    if (!context->ble.nimble_ready) {
-        NimBLEDevice::setPower(ESP_PWR_LVL_N0);  // lower power
-        NimBLEDevice::setMTU(23);                // minimum MTU
-        NimBLEDevice::init("");
-        context->ble.nimble_ready = true;
+    if (!ensure_ble_host_ready()) {
+        Serial.println("[BLE] host not ready");
+        context->ble.busy = false;
+        return;
     }
 
     context->ble.flood_active = true;

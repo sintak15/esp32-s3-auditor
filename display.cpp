@@ -16,6 +16,11 @@ extern lv_obj_t *lora_chat_panel;
 extern lv_obj_t *ta_lora_chat;
 extern lv_obj_t *lora_log_panel;
 extern lv_obj_t *ui_spinner;
+extern lv_obj_t *diagnostics_panel;
+extern lv_obj_t *ta_diagnostics;
+extern lv_obj_t *sys_stats_panel;
+extern lv_obj_t *ta_sys_stats;
+extern lv_obj_t *lbl_gps_data;
 
 extern void trace_enter(const char *s);
 extern void trace_exit(const char *s);
@@ -31,6 +36,10 @@ static char* log_copy_buf = nullptr;
 static char* chat_copy_buf = nullptr;
 
 static AppContext* ui_context = nullptr;
+
+extern void get_last_crash_states(char* c0, char* c1, size_t max_len);
+extern bool is_emergency_heap();
+extern void get_perf_stats(char* buf, size_t max_len);
 
 // Thread-safe touch state memory to completely decouple LVGL from the I2C bus
 struct VolatileTouchState {
@@ -206,7 +215,7 @@ void ui_update_tick(lv_timer_t *timer) {
     // Guard against timer firing before ui_build() has finished assigning all objects
     if (!lbl_batt || !lbl_batt_pct || !lbl_sd || !lbl_wifi || !lbl_msg || !tabview ||
         !ta_lora_log || !lora_log_panel || !ta_lora_chat || !lora_chat_panel ||
-        !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel) {
+        !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel || !lbl_gps_data) {
         Serial.println("[UI] Skipping update - objects not ready");
         if (millis() - start > 20) {
             Serial.printf("[DIAG] slow: ui_update_tick %lu ms\n", (unsigned long)(millis() - start));
@@ -418,6 +427,95 @@ void ui_update_tick(lv_timer_t *timer) {
         last_unread_chat = false;
     }
 
+    // Update Diagnostics Panel if visible
+    if (diagnostics_panel && !lv_obj_has_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN) && ta_diagnostics) {
+        static uint32_t last_diag_draw = 0;
+        if (millis() - last_diag_draw > 1000) {
+            char c0[96], c1[96];
+            get_last_crash_states(c0, c1, sizeof(c0));
+            
+            uint32_t pcap_q = ui_context->sniffer.pcap_queue ? uxQueueMessagesWaiting(ui_context->sniffer.pcap_queue) : 0;
+            uint32_t probe_q = ui_context->sniffer.probe_queue ? uxQueueMessagesWaiting(ui_context->sniffer.probe_queue) : 0;
+            
+            UBaseType_t main_stack = ui_context->main_task_handle ? uxTaskGetStackHighWaterMark(ui_context->main_task_handle) : 0;
+            UBaseType_t wifi_stack = ui_context->wifi_task_handle ? uxTaskGetStackHighWaterMark(ui_context->wifi_task_handle) : 0;
+            UBaseType_t ui_stack = ui_context->ui_task_handle ? uxTaskGetStackHighWaterMark(ui_context->ui_task_handle) : 0;
+            UBaseType_t lora_stack = ui_context->lora.service_task ? uxTaskGetStackHighWaterMark(ui_context->lora.service_task) : 0;
+
+            char buf[512];
+            snprintf(buf, sizeof(buf), 
+                "--- MEMORY ---\n"
+                "Heap Free: %u\n"
+                "Heap Min: %u\n"
+                "Heap Largest: %u\n"
+                "PSRAM Free: %u\n\n"
+                "--- QUEUES ---\n"
+                "PCAP: %lu\n"
+                "Probe: %lu\n\n"
+                "--- STACKS (Free bytes) ---\n"
+                "Main: %lu  WiFi: %lu\n"
+                "UI: %lu  LoRa: %lu\n\n"
+                "--- LAST CRASH STAGES ---\n"
+                "Core 0: %s\n"
+                "Core 1: %s\n\n"
+                "--- STATUS ---\n"
+                "Degraded: %s\n"
+                "BLE Sniff: %d Flood: %d\n"
+                "WiFi Scan: %d",
+                ESP.getFreeHeap(), ESP.getMinFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), ESP.getFreePsram(),
+                pcap_q, probe_q,
+                (unsigned long)main_stack, (unsigned long)wifi_stack, (unsigned long)ui_stack, (unsigned long)lora_stack,
+                c0, c1,
+                is_emergency_heap() ? "YES" : "NO",
+                ui_context->ble.sniff_active, ui_context->ble.flood_active,
+                ui_context->wifi_scan.started && !ui_context->wifi_scan.paused);
+            
+            lv_textarea_set_text(ta_diagnostics, buf);
+            last_diag_draw = millis();
+        }
+    }
+
+    // Update System Stats Panel if visible
+    if (sys_stats_panel && !lv_obj_has_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN) && ta_sys_stats) {
+        static uint32_t last_sys_stats_draw = 0;
+        if (millis() - last_sys_stats_draw > 1000) {
+            char buf[512];
+            get_perf_stats(buf, sizeof(buf));
+            
+            lv_textarea_set_text(ta_sys_stats, buf);
+            last_sys_stats_draw = millis();
+        }
+    }
+
+    // Update GPS Panel if visible
+    if (tabview && lv_tabview_get_tab_act(tabview) == 8 && lbl_gps_data) {
+        static uint32_t last_gps_draw = 0;
+        if (millis() - last_gps_draw > 1000) {
+            if (ui_context->lora.mutex && xSemaphoreTake(ui_context->lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                if (ui_context->gps.valid) {
+                    char buf[256];
+                    snprintf(buf, sizeof(buf),
+                        "#AAAAAA Latitude:#  %.6f\n"
+                        "#AAAAAA Longitude:# %.6f\n"
+                        "#AAAAAA Altitude:#  %ld m\n"
+                        "#AAAAAA Sats View:# %lu\n"
+                        "#AAAAAA Fix Type:#  %lu\n"
+                        "#AAAAAA Updated:#   %lu s ago",
+                        ui_context->gps.latitude,
+                        ui_context->gps.longitude,
+                        (long)ui_context->gps.altitude,
+                        (unsigned long)ui_context->gps.sats_in_view,
+                        (unsigned long)ui_context->gps.fix_quality,
+                        (unsigned long)((millis() - ui_context->gps.last_update_ms) / 1000)
+                    );
+                    lv_label_set_text(lbl_gps_data, buf);
+                }
+                xSemaphoreGive(ui_context->lora.mutex);
+            }
+            last_gps_draw = millis();
+        }
+    }
+
     // Activity Spinner
     if (ui_spinner) {
         bool is_active = (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active || 
@@ -427,8 +525,8 @@ void ui_update_tick(lv_timer_t *timer) {
         if ((int)is_active != last_is_active) {
             // FIX: Hidden spinners STILL run animation timers and invalidate the screen. 
             // We must pause the animation entirely when hidden.
-            if (is_active) { lv_obj_clear_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); lv_anim_del(ui_spinner, NULL); }
-            else { lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); lv_anim_del(ui_spinner, NULL); }
+            if (is_active) { lv_obj_clear_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); }
+            else { lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); }
             last_is_active = is_active;
         }
     }

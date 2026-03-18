@@ -68,7 +68,8 @@ void process_pcap_queue(AppContext* context) {
     if (!context->sniffer.pcap_queue) return;
     pcap_record_t rec;
     int writes = 0;
-    uint32_t start_ms = millis();
+    uint32_t t0 = millis();
+    const uint32_t budgetMs = 6;
 
     while (xQueueReceive(context->sniffer.pcap_queue, &rec, 0) == pdTRUE) { // Pass address
         if (!context->sniffer.pcap_active || !context->sniffer.pcap_file) {
@@ -92,8 +93,9 @@ void process_pcap_queue(AppContext* context) {
         context->sniffer.pcap_packet_count++;
         writes++;
 
-        if (writes >= 8) break;
-        if (millis() - start_ms >= 10) break;
+        if ((millis() - t0) >= budgetMs || writes >= 8) {
+            break;
+        }
     }
 }
 
@@ -101,6 +103,8 @@ void process_probe_queue(AppContext* context) {
     if (!context->sniffer.probe_active) return;
     ProbeSsid received_probe_ssid; // Receive into a struct
     int processed = 0;
+    uint32_t t0 = millis();
+    const uint32_t budgetMs = 6;
     
     while (xQueueReceive(context->sniffer.probe_queue, &received_probe_ssid, 0) == pdTRUE) { // Pass address
         if (strlen(received_probe_ssid.data) > 0 && context->sniffer.unique_probes.find(received_probe_ssid) == context->sniffer.unique_probes.end()) {
@@ -117,7 +121,10 @@ void process_probe_queue(AppContext* context) {
             }
         }
         
-        if (++processed >= 8) break;
+        processed++;
+        if ((millis() - t0) >= budgetMs || processed >= 8) {
+            break;
+        }
     }
 }
 

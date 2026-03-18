@@ -12,7 +12,7 @@ extern AppContext g_app_context;
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
 lv_obj_t *lbl_sd, *lbl_wifi, *lbl_batt, *lbl_batt_pct, *lbl_msg;
-lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora; // Consolidated tab declarations
+lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora, *tab_gps; // Consolidated tab declarations
 lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
 lv_obj_t *lbl_pt_target, *lbl_pt_bssid, *lbl_pt_status;
@@ -39,6 +39,13 @@ lv_obj_t *ta_lora_chat = nullptr;
 lv_obj_t *ta_lora_chat_input = nullptr;
 lv_obj_t *lora_log_panel = nullptr;
 lv_obj_t *ui_spinner = nullptr;
+lv_obj_t *lbl_gps_data = nullptr;
+
+lv_obj_t *beacon_ssid_panel = nullptr;
+lv_obj_t *diagnostics_panel = nullptr;
+lv_obj_t *ta_diagnostics = nullptr;
+lv_obj_t *sys_stats_panel = nullptr;
+lv_obj_t *ta_sys_stats = nullptr;
 
 extern void toggle_web_server();
 extern void spoof_mac();
@@ -156,8 +163,9 @@ void ui_build() {
   tab_probes  =lv_tabview_add_tab(tabview, "Probes");
   tab_settings =lv_tabview_add_tab(tabview, "Settings");
   tab_lora    =lv_tabview_add_tab(tabview, "LoRa");
+  tab_gps     =lv_tabview_add_tab(tabview, "GPS");
   
-  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_pentest,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tv_cont};
+  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_pentest,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,tv_cont};
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
@@ -187,6 +195,7 @@ void ui_build() {
   hub(tab_home,LV_SYMBOL_EYE_OPEN,  "PROBES",  0,2,[](lv_event_t*){ navigate_to(5); },0xFF00FF);
   hub(tab_home,LV_SYMBOL_SETTINGS,  "SETTINGS",1,2,[](lv_event_t*){ navigate_to(6); },0xAAAAAA);
   hub(tab_home,LV_SYMBOL_USB,       "LORA",    0,3,[](lv_event_t*){ navigate_to(7); },0x00AAFF);
+  hub(tab_home,LV_SYMBOL_GPS,       "GPS",     1,3,[](lv_event_t*){ navigate_to(8); },0x00FF00);
 
   // ── Shared return-home button builder ─────────
   auto add_return_btn=[](lv_obj_t *parent) {
@@ -396,26 +405,52 @@ void ui_build() {
   add_return_btn(tab_probes);
 
   // ── Settings Tab ──────────────────────────────
-  lv_obj_t *lbl_st = lv_label_create(tab_settings);
-  lv_label_set_text(lbl_st, "#AAAAAA Beacon SSIDs (one per line):#");
-  lv_obj_align(lbl_st, LV_ALIGN_TOP_LEFT, 5, 5);
+  lv_obj_set_style_pad_all(tab_settings, 6, 0);
 
-  ta_beacon_ssids = lv_textarea_create(tab_settings);
-  lv_obj_set_size(ta_beacon_ssids, SCREEN_W - 20, 120);
-  lv_obj_align_to(ta_beacon_ssids, lbl_st, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 5);
-  lv_textarea_set_max_length(ta_beacon_ssids, MAX_BEACON_SSIDS * (MAX_BEACON_SSID_LENGTH + 1)); // Max length for all SSIDs
+  lv_obj_t *btn_open_beacon_ssids = make_atk_btn(tab_settings, LV_SYMBOL_EDIT " BEACON SSIDs", &style_btn_dark, 0xAAAAAA, [](lv_event_t *e) {
+      if (beacon_ssid_panel) lv_obj_clear_flag(beacon_ssid_panel, LV_OBJ_FLAG_HIDDEN);
+  }, 10);
+  lv_obj_clear_flag(btn_open_beacon_ssids, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *btn_open_diag = make_atk_btn(tab_settings, LV_SYMBOL_SETTINGS " SYSTEM DIAGNOSTICS", &style_btn_dark, 0x00FFCC, [](lv_event_t *e) {
+      if (diagnostics_panel) lv_obj_clear_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
+  }, 60);
+  lv_obj_clear_flag(btn_open_diag, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *btn_open_sys_stats = make_atk_btn(tab_settings, LV_SYMBOL_LIST " PERFORMANCE STATS", &style_btn_dark, 0xFFAA00, [](lv_event_t *e) {
+      if (sys_stats_panel) lv_obj_clear_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN);
+  }, 110);
+  lv_obj_clear_flag(btn_open_sys_stats, LV_OBJ_FLAG_HIDDEN);
+
+  add_return_btn(tab_settings);
+
+  // --- Beacon SSID Modal Panel ---
+  beacon_ssid_panel = lv_obj_create(main_screen);
+  lv_obj_set_size(beacon_ssid_panel, SCREEN_W, SCREEN_H - 32);
+  lv_obj_align(beacon_ssid_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_bg_color(beacon_ssid_panel, lv_color_hex(0x050505), 0);
+  lv_obj_set_style_border_color(beacon_ssid_panel, lv_color_hex(0xAAAAAA), 0);
+  lv_obj_set_style_border_width(beacon_ssid_panel, 2, 0);
+  lv_obj_add_flag(beacon_ssid_panel, LV_OBJ_FLAG_HIDDEN);
+  no_scroll(beacon_ssid_panel);
+
+  lv_obj_t *lbl_beacon_title = lv_label_create(beacon_ssid_panel);
+  lv_label_set_text(lbl_beacon_title, "#AAAAAA " LV_SYMBOL_EDIT " BEACON SSIDs#");
+  lv_label_set_recolor(lbl_beacon_title, true);
+  lv_obj_align(lbl_beacon_title, LV_ALIGN_TOP_MID, 0, 0);
+
+  ta_beacon_ssids = lv_textarea_create(beacon_ssid_panel);
+  lv_obj_set_size(ta_beacon_ssids, SCREEN_W - 20, 110);
+  lv_obj_align(ta_beacon_ssids, LV_ALIGN_TOP_MID, 0, 30);
+  lv_textarea_set_max_length(ta_beacon_ssids, MAX_BEACON_SSIDS * (MAX_BEACON_SSID_LENGTH + 1));
   lv_textarea_set_placeholder_text(ta_beacon_ssids, "Enter SSIDs (one per line)...");
   lv_textarea_set_one_line(ta_beacon_ssids, false);
   lv_obj_add_event_cb(ta_beacon_ssids, [](lv_event_t *e) {
-    // When text area content changes, update g_app_context.pentest.custom_beacon_ssids
-    // The actual saving to NVS should ideally be triggered by a "Save" button
-    // to avoid frequent NVS writes and potential performance issues.
     const char* text = lv_textarea_get_text(ta_beacon_ssids);
     g_app_context.pentest.custom_beacon_ssids.clear();
     
     char current_ssid[MAX_BEACON_SSID_LENGTH + 1] = {0};
     int idx = 0;
-    
     for (int i = 0; text[i] != '\0'; ++i) {
       if (text[i] == '\n') {
         if (idx > 0) {
@@ -434,25 +469,92 @@ void ui_build() {
     }
   }, LV_EVENT_VALUE_CHANGED, nullptr);
 
-  // Populate text area with current SSIDs
   String all_ssids = "";
   for (const String& ssid : g_app_context.pentest.custom_beacon_ssids) {
     all_ssids += ssid + "\n";
   }
   lv_textarea_set_text(ta_beacon_ssids, all_ssids.c_str());
 
-  // Add a "Save" button for beacon SSIDs
-  lv_obj_t *btn_save_ssids = lv_btn_create(tab_settings);
-  lv_obj_set_size(btn_save_ssids, SCREEN_W - 20, 36);
-  lv_obj_align_to(btn_save_ssids, ta_beacon_ssids, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
+  lv_obj_t *btn_save_ssids = lv_btn_create(beacon_ssid_panel);
+  lv_obj_set_size(btn_save_ssids, SCREEN_W / 2 - 20, 36);
+  lv_obj_align(btn_save_ssids, LV_ALIGN_BOTTOM_RIGHT, -10, -5);
   lv_obj_add_style(btn_save_ssids, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_save_ssids, [](lv_event_t *e) {
     save_beacon_ssids_to_nvs(&g_app_context);
     lv_label_set_text(lv_obj_get_child(e->target, 0), LV_SYMBOL_OK " SAVED!");
   }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_save_ssids = lv_label_create(btn_save_ssids); lv_label_set_text(lbl_save_ssids, LV_SYMBOL_SAVE " SAVE SSIDs"); lv_obj_center(lbl_save_ssids);
+  lv_obj_t *lbl_save_ssids = lv_label_create(btn_save_ssids); lv_label_set_text(lbl_save_ssids, "SAVE"); lv_obj_center(lbl_save_ssids);
 
-  add_return_btn(tab_settings);
+  lv_obj_t *btn_close_beacon = lv_btn_create(beacon_ssid_panel);
+  lv_obj_set_size(btn_close_beacon, SCREEN_W / 2 - 20, 36);
+  lv_obj_align(btn_close_beacon, LV_ALIGN_BOTTOM_LEFT, 10, -5);
+  lv_obj_add_style(btn_close_beacon, &style_btn_dark, 0);
+  lv_obj_add_event_cb(btn_close_beacon, [](lv_event_t *e) {
+      if (beacon_ssid_panel) lv_obj_add_flag(beacon_ssid_panel, LV_OBJ_FLAG_HIDDEN);
+  }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lbl_close_beacon = lv_label_create(btn_close_beacon); lv_label_set_text(lbl_close_beacon, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_beacon);
+
+  // --- Diagnostics Modal Panel ---
+  diagnostics_panel = lv_obj_create(main_screen);
+  lv_obj_set_size(diagnostics_panel, SCREEN_W, SCREEN_H - 32);
+  lv_obj_align(diagnostics_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_bg_color(diagnostics_panel, lv_color_hex(0x050505), 0);
+  lv_obj_set_style_border_color(diagnostics_panel, lv_color_hex(0x00FFCC), 0);
+  lv_obj_set_style_border_width(diagnostics_panel, 2, 0);
+  lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
+  no_scroll(diagnostics_panel);
+
+  lv_obj_t *lbl_diag_title = lv_label_create(diagnostics_panel);
+  lv_label_set_text(lbl_diag_title, "#00FFCC " LV_SYMBOL_SETTINGS " SYSTEM DIAGNOSTICS#");
+  lv_label_set_recolor(lbl_diag_title, true);
+  lv_obj_align(lbl_diag_title, LV_ALIGN_TOP_MID, 0, 0);
+
+  ta_diagnostics = lv_textarea_create(diagnostics_panel);
+  lv_obj_set_size(ta_diagnostics, SCREEN_W - 20, SCREEN_H - 90);
+  lv_obj_align(ta_diagnostics, LV_ALIGN_TOP_MID, 0, 30);
+  lv_textarea_set_text(ta_diagnostics, "Gathering data...\n");
+  lv_obj_clear_flag(ta_diagnostics, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+  lv_obj_set_style_text_font(ta_diagnostics, &lv_font_montserrat_14, 0);
+
+  lv_obj_t *btn_close_diag = lv_btn_create(diagnostics_panel);
+  lv_obj_set_size(btn_close_diag, SCREEN_W - 30, 36);
+  lv_obj_align(btn_close_diag, LV_ALIGN_BOTTOM_MID, 0, -5);
+  lv_obj_add_style(btn_close_diag, &style_btn_dark, 0);
+  lv_obj_add_event_cb(btn_close_diag, [](lv_event_t *e) {
+      if (diagnostics_panel) lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
+  }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lbl_close_diag = lv_label_create(btn_close_diag); lv_label_set_text(lbl_close_diag, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_diag);
+
+  // --- System Stats Modal Panel ---
+  sys_stats_panel = lv_obj_create(main_screen);
+  lv_obj_set_size(sys_stats_panel, SCREEN_W, SCREEN_H - 32);
+  lv_obj_align(sys_stats_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_bg_color(sys_stats_panel, lv_color_hex(0x050505), 0);
+  lv_obj_set_style_border_color(sys_stats_panel, lv_color_hex(0xFFAA00), 0);
+  lv_obj_set_style_border_width(sys_stats_panel, 2, 0);
+  lv_obj_add_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN);
+  no_scroll(sys_stats_panel);
+
+  lv_obj_t *lbl_stats_title2 = lv_label_create(sys_stats_panel);
+  lv_label_set_text(lbl_stats_title2, "#FFAA00 " LV_SYMBOL_LIST " PERFORMANCE STATS#");
+  lv_label_set_recolor(lbl_stats_title2, true);
+  lv_obj_align(lbl_stats_title2, LV_ALIGN_TOP_MID, 0, 0);
+
+  ta_sys_stats = lv_textarea_create(sys_stats_panel);
+  lv_obj_set_size(ta_sys_stats, SCREEN_W - 20, SCREEN_H - 90);
+  lv_obj_align(ta_sys_stats, LV_ALIGN_TOP_MID, 0, 30);
+  lv_textarea_set_text(ta_sys_stats, "Gathering data...\n");
+  lv_obj_clear_flag(ta_sys_stats, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+  lv_obj_set_style_text_font(ta_sys_stats, &lv_font_montserrat_14, 0);
+
+  lv_obj_t *btn_close_sys_stats = lv_btn_create(sys_stats_panel);
+  lv_obj_set_size(btn_close_sys_stats, SCREEN_W - 30, 36);
+  lv_obj_align(btn_close_sys_stats, LV_ALIGN_BOTTOM_MID, 0, -5);
+  lv_obj_add_style(btn_close_sys_stats, &style_btn_dark, 0);
+  lv_obj_add_event_cb(btn_close_sys_stats, [](lv_event_t *e) {
+      if (sys_stats_panel) lv_obj_add_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN);
+  }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lbl_close_sys_stats = lv_label_create(btn_close_sys_stats); lv_label_set_text(lbl_close_sys_stats, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_sys_stats);
 
   // --- LoRa Stats Modal Panel ---
   lora_stats_panel = lv_obj_create(main_screen);
@@ -675,6 +777,20 @@ void ui_build() {
   lv_label_set_text(lh_lora, LV_SYMBOL_HOME " RETURN HOME"); 
   lv_obj_center(lh_lora);
 
+  // ── GPS Tab ───────────────────────────────────
+  lv_obj_set_style_pad_all(tab_gps, 6, 0);
+  lv_obj_t *lbl_gps_title = lv_label_create(tab_gps);
+  lv_label_set_text(lbl_gps_title, "#00FF00 " LV_SYMBOL_GPS " LOCAL GPS DATA#");
+  lv_label_set_recolor(lbl_gps_title, true);
+  lv_obj_align(lbl_gps_title, LV_ALIGN_TOP_MID, 0, 10);
+
+  lbl_gps_data = lv_label_create(tab_gps);
+  lv_label_set_text(lbl_gps_data, "#888888 Waiting for GPS fix...#\n\n(Node must be broadcasting\nposition packets)");
+  lv_label_set_recolor(lbl_gps_data, true);
+  lv_obj_align(lbl_gps_data, LV_ALIGN_TOP_LEFT, 10, 50);
+
+  add_return_btn(tab_gps);
+
   // Setup Global Keyboard layer for the input
   kb = lv_keyboard_create(main_screen);
   lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
@@ -696,6 +812,8 @@ void ui_build() {
           } else if (ta == ta_lora_chat_input) {
               extern void cb_send_lora_chat(lv_event_t* e);
               cb_send_lora_chat(e);
+          } else if (ta == ta_beacon_ssids) {
+              // Just close keyboard
           }
           lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
           lv_obj_clear_state(ta, LV_STATE_FOCUSED);
@@ -703,4 +821,5 @@ void ui_build() {
   };
   lv_obj_add_event_cb(ta_lora_input, kb_cb, LV_EVENT_ALL, nullptr);
   lv_obj_add_event_cb(ta_lora_chat_input, kb_cb, LV_EVENT_ALL, nullptr);
+  lv_obj_add_event_cb(ta_beacon_ssids, kb_cb, LV_EVENT_ALL, nullptr);
 }
