@@ -396,8 +396,9 @@ void status_service_task(void *pv) {
         uint32_t raw_mv = (raw_sum / 10) * 2; // Standard 1:2 divider calculation
 
         // Exponential Moving Average (EMA) low-pass filter to prevent flickering
-        if (filtered_mv == 0.0f) {
-            filtered_mv = (float)raw_mv;
+        // Fast-track: if the change is > 80mV, assume plug/unplug and skip filtering
+        if (filtered_mv == 0.0f || abs((int32_t)raw_mv - (int32_t)filtered_mv) > 80) {
+            filtered_mv = (float)raw_mv; 
         } else {
             filtered_mv = (alpha * (float)raw_mv) + ((1.0f - alpha) * filtered_mv);
         }
@@ -405,12 +406,12 @@ void status_service_task(void *pv) {
         uint32_t mv = (uint32_t)filtered_mv;
         
         // Calculate percentage locally with strict clamping to 0-100
-        // Li-ion: 3200mV (Empty/Shutdown) to 4180mV (Full)
-        int newBattPct = map(constrain(mv, 3200, 4180), 3200, 4180, 0, 100);
+        // Li-ion: 3200mV (Empty/Shutdown) to 4150mV (Full)
+        int newBattPct = map(constrain(mv, 3200, 4150), 3200, 4150, 0, 100);
         
-        // Heuristic: If reading is above 4250mV on a 1S battery, it's physically 
+        // Heuristic: If reading is above 4200mV on a 1S battery, it's physically 
         // impossible unless a charger is applying 5V to the rail.
-        bool charging = (mv > 4250); 
+        bool charging = (mv > 4200); 
 
         if (!sd_card_ready() && millis() - sd_retry_ms > 5000) {
             if (!g_app_context.sniffer.pcap_active && 
@@ -422,7 +423,7 @@ void status_service_task(void *pv) {
             }
         }
         write_status_snapshot(sd_card_ready(), newBattPct, charging, mv);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(500)); // Sample twice as fast for better responsiveness
     }
 }
 

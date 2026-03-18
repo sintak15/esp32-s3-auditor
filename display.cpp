@@ -22,6 +22,10 @@ extern lv_obj_t *ta_diagnostics;
 extern lv_obj_t *sys_stats_panel;
 extern lv_obj_t *ta_sys_stats;
 extern lv_obj_t *lbl_gps_data;
+extern lv_obj_t *battery_stats_panel;
+extern lv_obj_t *lbl_battery_stats;
+extern lv_obj_t *ui_battery_chart;
+extern lv_chart_series_t *ui_battery_series;
 
 extern void trace_enter(const char *s);
 extern void trace_exit(const char *s);
@@ -437,6 +441,15 @@ void ui_update_tick(lv_timer_t *timer) {
         last_unread_chat = false;
     }
 
+    // Background Battery History Tracking (Updates even when panel is hidden)
+    static uint32_t last_chart_update = 0;
+    if (millis() - last_chart_update > 5000) {
+        if (ui_battery_chart && ui_battery_series) {
+            lv_chart_set_next_value(ui_battery_chart, ui_battery_series, ss.batteryMv);
+        }
+        last_chart_update = millis();
+    }
+
     // Update Diagnostics Panel if visible
     if (diagnostics_panel && !lv_obj_has_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN) && ta_diagnostics) {
         static uint32_t last_diag_draw = 0;
@@ -482,6 +495,28 @@ void ui_update_tick(lv_timer_t *timer) {
             
             lv_textarea_set_text(ta_diagnostics, buf);
             last_diag_draw = millis();
+        }
+    }
+
+    // Update Battery Detail Panel if visible
+    if (battery_stats_panel && !lv_obj_has_flag(battery_stats_panel, LV_OBJ_FLAG_HIDDEN) && lbl_battery_stats) {
+        static uint32_t last_batt_draw = 0;
+        if (millis() - last_batt_draw > 500) {
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                "#00FF88 Power Rail Info#\n\n"
+                "#AAAAAA Voltage:#   #FFFFFF %.2f V#\n"
+                "#AAAAAA Capacity:#  #FFFFFF %d %%#\n"
+                "#AAAAAA Status:#    #FFFFFF %s#\n"
+                "#AAAAAA ADC Pin:#   #FFFFFF GPIO %d#\n"
+                "#AAAAAA V-Divider:# #FFFFFF 1:2 (100k)#\n\n"
+                "#AAAAAA Health:#    #00FF88 GOOD#",
+                (float)ss.batteryMv / 1000.0f,
+                ss.batteryPct,
+                ss.isCharging ? "USB Connected (Charging)" : "On Battery",
+                BATT_ADC);
+            lv_label_set_text(lbl_battery_stats, buf);
+            last_batt_draw = millis();
         }
     }
 
