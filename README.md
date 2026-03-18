@@ -1,45 +1,67 @@
-# **ESP32-S3 Pentest Suite 🛡️**
+# ESP32-S3 Pentester (Refactored)
 
-A high-performance wireless auditing and penetration testing suite built for the ESP32-S3. This tool utilizes LVGL for a smooth, touch-enabled UI and features dual-core FreeRTOS processing for high-speed packet sniffing, BLE spoofing, and wardriving.
+A high-performance ESP32-S3-based wireless analysis and testing toolkit featuring Wi-Fi scanning, BLE sniffing/flooding, LoRa support, SD logging, and a real-time LVGL UI.
 
-## **⚠️ Disclaimer**
+This version is heavily refactored for stability, performance, and memory safety.
 
-**This tool is strictly for educational purposes and authorized auditing of networks you own or have explicit permission to test.** Do not use this device to interfere with public, private, or enterprise networks without authorization.
+---
 
-## **✨ Features**
+## 🚀 Features
 
-* **Dual-Core Architecture:** UI runs cleanly on Core 1 while intensive packet sniffing/hopping runs on Core 0\.  
-* **WiFi Reconnaissance:** \* AP and Station (Client) scanning.  
-  * Target mapping and AP-Client association tracking.  
-* **Active WiFi Auditing:**  
-  * Deauthentication testing (Targeted or Broadcast).  
-  * Beacon Flooding (SSID spoofing).  
-  * PMKID Capture (Saved directly to SD card for Hashcat).  
-* **Passive Sniffing (High Speed):**  
-  * **PCAP Capture:** Captures raw 802.11 frames to .pcap on the SD card using a high-speed PSRAM ring buffer.  
-  * **Probe Request Sniffing:** Monitors nearby devices searching for hidden/known networks.  
-* **Bluetooth (BLE) Module:**  
-  * BLE Device Sniffing (Logs unique MACs and RSSI).  
-  * Apple BLE Spam/Spoofing (Pop-up flooding).  
+### 📡 Wi-Fi
+- Active AP scanning
+- Station (client) detection
+- AP ↔ client association mapping (linked view)
+- Channel hopping
+- Promiscuous mode capture
+- PCAP queue pipeline (for logging/export)
 
-## **🛠️ Hardware Requirements**
+### 📶 BLE
+- BLE advertisement sniffing (NimBLE-based)
+- BLE flood (advertising spam testing)
+- Fixed-size unique device tracking (no heap fragmentation)
+- Ring-buffer packet pipeline
+- SD logging support
 
-* **Microcontroller:** ESP32-S3 (with PSRAM enabled, OPI recommended)  
-* **Display:** 2.8" IPS TFT LCD (ST7789/ILI9341) with Capacitive/I2C Touch (CST8xx)  
-* **Storage:** SD/MMC Card Module (Required for PCAP and PMKID saving)  
+### 📻 LoRa
+- Packet decoding pipeline
+- Background service task
+- UI + logging integration
 
-## **⚙️ Dependencies**
+### 💾 Storage
+- SD card logging (Wi-Fi + BLE)
+- FAT partition support
+- Non-blocking logging pipeline
 
-Install the following libraries in the Arduino IDE:
+### 🖥 UI (LVGL)
+- Real-time scan display
+- Multi-tab interface
+- Touch-safe rendering (no redraw during scroll)
+- Fixed object pools (no LVGL fragmentation)
 
-* TFT\_eSPI (Configure User\_Setup.h for your specific display pins)  
-* lvgl (v8.3.x recommended)  
-* NimBLE-Arduino  
+---
 
-## **🚀 Installation & Build**
+## 🧠 Architecture
 
-1. Create a folder named esp32-s3-pentester and place esp32-s3-pentester.ino inside it.  
-2. Open the project in the Arduino IDE.  
-3. Select your ESP32-S3 board. Ensure **PSRAM is enabled** in the Tools menu (e.g., "OPI PSRAM").  
-4. Set the partition scheme to allow enough space (e.g., 16MB (3MB APP, 9MB FATFS) or similar Large APP setting).  
-5. Compile and upload.
+### RTOS Task Layout
+
+| Task | Core | Purpose |
+|------|------|--------|
+| main_app_task | 0 | UI + coordination |
+| ble_task | 0 | BLE control + flood |
+| lora_service_task | 1 | LoRa processing |
+| LVGL timer | 1 | UI rendering |
+
+---
+
+## 📜 License (MIT)
+
+MIT License
+
+Copyright (c) 2026 Justin Stephenson
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.

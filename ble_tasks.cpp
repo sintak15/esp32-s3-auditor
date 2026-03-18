@@ -7,6 +7,7 @@
 #include <WiFi.h> // For WiFi.disconnect()
 #include <esp_wifi.h> // For esp_wifi_get_mode
 #include <esp_random.h>
+#include <esp_bt.h>
 #include "ui_events.h"
 
 extern lv_obj_t *lbl_ble_status, *btn_ble_flood, *btn_ble_sniff;
@@ -131,14 +132,16 @@ static void internal_start_ble_sniff(AppContext* context) {
     vTaskDelay(pdMS_TO_TICKS(50));
 
     if (!context->ble.nimble_ready) {
+        NimBLEDevice::setPower(ESP_PWR_LVL_N0);  // lower power
+        NimBLEDevice::setMTU(23);                // minimum MTU
         NimBLEDevice::init("");
         context->ble.nimble_ready = true;
     }
     context->ble.scanner = NimBLEDevice::getScan();
     context->ble.scanner->setScanCallbacks(ble_sniffer_cb_instance, true);
-    context->ble.scanner->setActiveScan(true);
-    context->ble.scanner->setInterval(160); // FIX 6: Reduce scan pressure
-    context->ble.scanner->setWindow(80);
+    context->ble.scanner->setActiveScan(false); // Reduce memory & CPU load
+    context->ble.scanner->setInterval(400);     // Soften scan duty
+    context->ble.scanner->setWindow(40);
     context->ble.scanner->start(0, false, true);
 
     if (ble_mutex && xSemaphoreTake(ble_mutex, portMAX_DELAY) == pdTRUE) {
@@ -174,6 +177,8 @@ static void internal_start_ble_flood(AppContext* context) {
     // Init NimBLE once here — process_ble_flood will reuse it each cycle
     // rather than deinit/reinit every 300ms (which causes PC=0x0 crash)
     if (!context->ble.nimble_ready) {
+        NimBLEDevice::setPower(ESP_PWR_LVL_N0);  // lower power
+        NimBLEDevice::setMTU(23);                // minimum MTU
         NimBLEDevice::init("");
         context->ble.nimble_ready = true;
     }
@@ -213,7 +218,7 @@ static void internal_process_ble_flood(AppContext* context) {
     adv->stop();
 
     uint8_t ap[] = {0x4C,0x00,0x07,0x19,0x01,0x0A,0x20,0x55,0x14,0x58,0x6E,0x42,
-                    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+                    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}; // Reduced to 24 bytes to strictly respect 31-byte BLE packet limit
     esp_fill_random(&ap[12], 6); 
 
     if (!g_adv_initialized) {
@@ -266,8 +271,8 @@ void ble_tasks_init(AppContext* context) {
     ble_mutex = xSemaphoreCreateMutex();
     
     ble_cmd_q = xQueueCreate(10, sizeof(BleCmd));
-    // Spin up BLE worker off the main rendering core 1, placing it entirely on core 0
-    xTaskCreatePinnedToCore(ble_worker_task, "ble_task", 6144, context, 1, &ble_task_handle, 0); 
+    // Spin up BLE worker on core 1 to reduce contention with WiFi/system on core 0
+    xTaskCreatePinnedToCore(ble_worker_task, "ble_task", 6144, context, 1, &ble_task_handle, 1); 
 }
 
 void stop_ble(AppContext* context) {
@@ -289,7 +294,14 @@ void start_ble_sniff(AppContext* context) {
 
     if (context->ble.busy) return;
     
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
+    if (context->ble.flood_active) {
+        Serial.println("[BLE] refusing sniff while flood is active");
+        queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "START BLE SNIFF");
+        queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 ERROR#\n\nStop flooding first.");
+        return;
+    }
+    
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 60000) {
         Serial.println("[BLE] start denied: low internal heap");
         queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "START BLE SNIFF");
         queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
@@ -308,7 +320,14 @@ void start_ble_flood(AppContext* context) {
 
     if (context->ble.busy) return;
     
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 50000) {
+    if (context->ble.sniff_active) {
+        Serial.println("[BLE] refusing flood while sniff is active");
+        queue_local_ui_text(UI_EVT_SET_BLE_FLOOD_BUTTON, "START BLE FLOOD");
+        queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 ERROR#\n\nStop sniffing first.");
+        return;
+    }
+    
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 60000) {
         Serial.println("[BLE] start denied: low internal heap");
         queue_local_ui_text(UI_EVT_SET_BLE_FLOOD_BUTTON, "START BLE FLOOD");
         queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
@@ -331,17 +350,17 @@ void process_ble_sniff_ui(AppContext* context) {
     BleState& ble = context->ble;
     uint32_t unique_size = 0;
     uint32_t pkt_count = 0;
-    static char last_mac_str[18] = ""; // Fixed static buffer to completely eliminate String heap fragmentation
 
     if (ble_mutex && xSemaphoreTake(ble_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         // FIX 5: Proper ring buffer consumer
-        while (ble.ring_tail != ble.ring_head) {
+        uint8_t processed = 0;
+        while (ble.ring_tail != ble.ring_head && processed < 8) {
             uint8_t i = ble.ring_tail;
-            strncpy(last_mac_str, ble.ring_buf[i].mac, 17);
-            last_mac_str[17] = '\0';
-            ble.last_mac = last_mac_str; // For broader application context if used elsewhere
+            strncpy(ble.last_mac, ble.ring_buf[i].mac, 17);
+            ble.last_mac[17] = '\0';
             if (sd_card_ready()) sd_log_ble_sniff(millis(), ble.ring_buf[i].mac, ble.ring_buf[i].rssi);
             ble.ring_tail = (ble.ring_tail + 1) % BLE_RING_SIZE;
+            processed++;
         }
         unique_size = ble.unique_macs.size();
         pkt_count = ble.packet_count;
@@ -352,7 +371,7 @@ void process_ble_sniff_ui(AppContext* context) {
     if (millis() - last_ui < 1000) return;
     char buf[128];
     snprintf(buf, sizeof(buf), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
-             pkt_count, unique_size, last_mac_str);
+             pkt_count, unique_size, ble.last_mac);
     queue_local_ui_text(UI_EVT_SET_BLE_STATUS, buf);
     last_ui = millis();
 }

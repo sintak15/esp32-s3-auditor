@@ -20,6 +20,8 @@ struct LogMsg {
     char line[MAX_LOG_LINE_LEN];
 };
 static QueueHandle_t sd_log_queue = nullptr;
+static uint8_t* sd_log_queue_storage = nullptr;
+static StaticQueue_t* sd_log_queue_buffer = nullptr;
 
 // Global helper to guard against SD MMC driver crashing due to DMA buffer starvation
 static bool sd_has_working_heap(size_t need = 24576) {
@@ -88,7 +90,14 @@ void sd_logger_init() {
 
     // Initialize the background logging task and queue
     if (!sd_log_queue) {
-        sd_log_queue = xQueueCreate(128, sizeof(LogMsg));
+        sd_log_queue_storage = (uint8_t*)ps_malloc(128 * sizeof(LogMsg));
+        sd_log_queue_buffer = (StaticQueue_t*)ps_malloc(sizeof(StaticQueue_t));
+        if (sd_log_queue_storage && sd_log_queue_buffer) {
+            sd_log_queue = xQueueCreateStatic(128, sizeof(LogMsg), sd_log_queue_storage, sd_log_queue_buffer);
+        } else {
+            sd_log_queue = xQueueCreate(128, sizeof(LogMsg)); // Fallback
+        }
+        
         if (sd_log_queue) {
             xTaskCreate(sd_log_task, "sd_logger_task", 4096, nullptr, 1, nullptr);
         }

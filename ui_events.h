@@ -39,13 +39,19 @@ struct UiEvent {
 
 class UiEventQueue {
 private:
-    UiEvent buffer[UI_RING_SIZE];
+    UiEvent* buffer = nullptr;
     volatile uint32_t head = 0; // Write index
     volatile uint32_t tail = 0; // Read index
 
 public:
+    void init() {
+        buffer = (UiEvent*)ps_calloc(UI_RING_SIZE, sizeof(UiEvent));
+        if (!buffer) buffer = (UiEvent*)calloc(UI_RING_SIZE, sizeof(UiEvent)); // fallback
+    }
+
     // Zero-copy grab: gets a direct pointer to the next available slot in memory
     UiEvent* get_write_slot() {
+        if (!buffer) return nullptr;
         uint32_t next_head = (head + 1) % UI_RING_SIZE;
         if (next_head == tail) return nullptr; // Queue Full
         return &buffer[head];
@@ -54,6 +60,7 @@ public:
 
     // Zero-copy read: gets a pointer to the next event
     UiEvent* get_read_slot() {
+        if (!buffer) return nullptr;
         if (head == tail) return nullptr; // Queue Empty
         return &buffer[tail];
     }

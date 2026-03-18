@@ -11,6 +11,7 @@
 #include <freertos/task.h> // For TaskHandle_t
 #include <NimBLEDevice.h> // For NimBLEScan (used in BleState)
 #include <FS.h> // For File (used in SnifferState)
+#include "psram_allocator.h" // Custom allocator to force STL containers into PSRAM
 
 // ──────────────────────────────────────────────
 // Data Structures & Enums
@@ -111,7 +112,7 @@ struct PentestState {
   int beacon_idx;
   bool pmkid_found;
   uint8_t pmkid_target_bssid[6]; // Used in pentest_attacks.cpp
-  std::vector<String> custom_beacon_ssids; // For user-defined beacon SSIDs
+  std::vector<String, PsramAllocator<String>> custom_beacon_ssids; // For user-defined beacon SSIDs
 };
 
 // Define SnifferState
@@ -126,7 +127,7 @@ struct SnifferState {
   uint8_t channel;
   bool pcap_ch_locked; // Added for channel locking
   uint8_t pcap_locked_ch; // Added for locked channel value
-  std::set<ProbeSsid> unique_probes; // Changed from std::set<String>
+  std::set<ProbeSsid, std::less<ProbeSsid>, PsramAllocator<ProbeSsid>> unique_probes; // Changed from std::set<String>
   TaskHandle_t probe_task_handle; // For managing probe processing task
 };
 
@@ -137,9 +138,9 @@ struct BleState {
   bool busy;
   bool nimble_ready;
   NimBLEScan* scanner; // NimBLEScan is a static object, no need to manage its memory directly
-  std::set<MacAddress> unique_macs; // Changed from std::set<String>
+  std::set<MacAddress, std::less<MacAddress>, PsramAllocator<MacAddress>> unique_macs; // Changed from std::set<String>
   uint32_t packet_count;
-  String last_mac;
+  char last_mac[18];
   BLERing ring_buf[BLE_RING_SIZE];
   uint8_t ring_head;
   uint8_t ring_tail;
@@ -185,7 +186,7 @@ struct LoraState {
   bool nodedb_updated;
   bool unread_chat;
   LoraDeviceStats stats;
-  std::vector<NodeRecord> known_nodes;
+  std::vector<NodeRecord, PsramAllocator<NodeRecord>> known_nodes;
 };
 
 // Main AppContext
