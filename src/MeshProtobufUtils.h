@@ -120,6 +120,30 @@ namespace MeshUtils {
         p.time = 0; // Should be set by RTC/GPS provider
         return p;
     }
+
+    /**
+     * @brief Quality of Life helper to calculate battery percentage from millivolts.
+     * Li-Po discharge curves are non-linear; this uses a multi-point approximation
+     * suitable for the ESP32-S3 hardware.
+     */
+    inline uint32_t mvoltsToPct(uint32_t mvolts) {
+        if (mvolts >= 4150) return 100;
+        if (mvolts >= 4050) return 90;
+        if (mvolts >= 3950) return 80;
+        if (mvolts >= 3800) return 60;
+        if (mvolts >= 3700) return 40;
+        if (mvolts >= 3600) return 20;
+        if (mvolts >= 3500) return 10;
+        return 0;
+    }
+
+    /**
+     * @brief Detects charging status based on voltage threshold for CYD/S3 hardware.
+     * USB VBUS typically pulls the measured battery voltage node above 4.3V.
+     */
+    inline bool isHardwareCharging(uint32_t mvolts) {
+        return mvolts > 4400;
+    }
 }
 
 #endif // MESH_PROTOBUF_UTILS_H

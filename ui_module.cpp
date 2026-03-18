@@ -12,11 +12,11 @@ extern AppContext g_app_context;
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
 lv_obj_t *lbl_sd, *lbl_wifi, *lbl_batt, *lbl_batt_pct, *lbl_msg;
-lv_obj_t *tab_home, *tab_scan, *tab_pentest, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora, *tab_gps; // Consolidated tab declarations
+lv_obj_t *tab_home, *tab_scan, *tab_audit, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora, *tab_gps; // Consolidated tab declarations
 lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
-lv_obj_t *lbl_pt_target, *lbl_pt_bssid, *lbl_pt_status;
-lv_obj_t *btn_deauth, *btn_beacon, *btn_pmkid, *btn_stop_pt;
+lv_obj_t *lbl_audit_target, *lbl_audit_bssid, *lbl_audit_status;
+lv_obj_t *btn_deauth, *btn_beacon, *btn_pmkid, *btn_stop_audit;
 lv_obj_t *lbl_ble_status;
 lv_obj_t *lbl_pcap_status;
 lv_obj_t *lbl_pcap_ch;
@@ -108,17 +108,17 @@ void ui_build() {
   no_scroll(status_bar);
 
   lv_obj_t *title=lv_label_create(status_bar);
-  lv_label_set_text(title, LV_SYMBOL_SETTINGS " PENTEST");
+  lv_label_set_text(title, LV_SYMBOL_SETTINGS " AUDITOR");
   lv_obj_set_style_text_color(title, lv_color_hex(0x00FFCC), 0);
   lv_obj_align(title, LV_ALIGN_LEFT_MID, 2, 0);
 
   ui_spinner = lv_spinner_create(status_bar, 1000, 60);
   lv_obj_set_size(ui_spinner, 16, 16);
-  lv_obj_align(ui_spinner, LV_ALIGN_LEFT_MID, 130, 0);
+  lv_obj_align(ui_spinner, LV_ALIGN_LEFT_MID, 95, 0);
   lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); // Hidden by default
 
   lv_obj_t *icont=lv_obj_create(status_bar);
-  lv_obj_set_size(icont, 130, 24); lv_obj_align(icont, LV_ALIGN_RIGHT_MID, 0, 0);
+  lv_obj_set_size(icont, 140, 24); lv_obj_align(icont, LV_ALIGN_RIGHT_MID, 0, 0);
   lv_obj_set_style_bg_opa(icont, 0, 0); lv_obj_set_style_border_width(icont, 0, 0);
   lv_obj_set_flex_flow(icont, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(icont, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -157,7 +157,7 @@ void ui_build() {
 
   tab_home    =lv_tabview_add_tab(tabview, "Home");
   tab_scan    =lv_tabview_add_tab(tabview, "Scan");
-  tab_pentest =lv_tabview_add_tab(tabview, "Pentest");
+  tab_audit   =lv_tabview_add_tab(tabview, "Audit");
   tab_ble     =lv_tabview_add_tab(tabview, "BLE");
   tab_pcap    =lv_tabview_add_tab(tabview, "PCAP");
   tab_probes  =lv_tabview_add_tab(tabview, "Probes");
@@ -165,7 +165,7 @@ void ui_build() {
   tab_lora    =lv_tabview_add_tab(tabview, "LoRa");
   tab_gps     =lv_tabview_add_tab(tabview, "GPS");
   
-  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_pentest,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,tv_cont};
+  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,tv_cont};
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
@@ -189,7 +189,7 @@ void ui_build() {
     lv_obj_set_style_text_color(lt,lv_color_hex(0xCCCCCC),0);
   };
   hub(tab_home,LV_SYMBOL_WIFI,      "SCAN",    0,0,cb_nav_scan,                                               0x00FFCC);
-  hub(tab_home,LV_SYMBOL_WARNING,   "PENTEST", 1,0,[](lv_event_t*){ navigate_to(2); },0xFF4444);
+  hub(tab_home,LV_SYMBOL_WARNING,   "AUDIT",   1,0,[](lv_event_t*){ navigate_to(2); },0xFF4444);
   hub(tab_home,LV_SYMBOL_BLUETOOTH, "BLE",     0,1,[](lv_event_t*){ navigate_to(3); },0x4444FF);
   hub(tab_home,LV_SYMBOL_FILE,      "PCAP",    1,1,[](lv_event_t*){ navigate_to(4); },0xFFFF00);
   hub(tab_home,LV_SYMBOL_EYE_OPEN,  "PROBES",  0,2,[](lv_event_t*){ navigate_to(5); },0xFF00FF);
@@ -266,41 +266,41 @@ void ui_build() {
   lv_obj_set_style_text_color(lbl_scan_pause,lv_color_hex(0x00FFCC),0);
   lv_obj_center(lbl_scan_pause);
 
-  // ── Pentest Tab ───────────────────────────────
-  lv_obj_set_style_pad_all(tab_pentest,6,0);
-  lbl_pt_target=lv_label_create(tab_pentest);
-  lv_label_set_recolor(lbl_pt_target,true);
-  lv_label_set_text(lbl_pt_target,"#888888 Select a target from SCAN#");
-  lv_obj_set_width(lbl_pt_target,SCREEN_W-20);
+  // ── Audit Tab ───────────────────────────────────
+  lv_obj_set_style_pad_all(tab_audit,6,0);
+  lbl_audit_target=lv_label_create(tab_audit);
+  lv_label_set_recolor(lbl_audit_target,true);
+  lv_label_set_text(lbl_audit_target,"#888888 Select a target from SCAN#");
+  lv_obj_set_width(lbl_audit_target,SCREEN_W-20);
   // FIX: SCROLL_CIRCULAR runs an infinite animation timer that invalidates the screen even when idle
-  lv_label_set_long_mode(lbl_pt_target,LV_LABEL_LONG_DOT);
-  lv_obj_align(lbl_pt_target,LV_ALIGN_TOP_MID,0,2);
-  lbl_pt_bssid=lv_label_create(tab_pentest);
-  lv_obj_set_style_text_color(lbl_pt_bssid,lv_color_hex(0x555555),0);
-  lv_obj_set_style_text_font(lbl_pt_bssid,&lv_font_montserrat_14,0);
-  lv_label_set_text(lbl_pt_bssid,"---");
+  lv_label_set_long_mode(lbl_audit_target,LV_LABEL_LONG_DOT);
+  lv_obj_align(lbl_audit_target,LV_ALIGN_TOP_MID,0,2);
+  lbl_audit_bssid=lv_label_create(tab_audit);
+  lv_obj_set_style_text_color(lbl_audit_bssid,lv_color_hex(0x555555),0);
+  lv_obj_set_style_text_font(lbl_audit_bssid,&lv_font_montserrat_14,0);
+  lv_label_set_text(lbl_audit_bssid,"---");
   // Prevent scrolling label from cascading full-screen redraws:
-  lv_obj_align(lbl_pt_bssid,LV_ALIGN_TOP_MID,0,24);
-  lbl_pt_status=lv_label_create(tab_pentest);
-  lv_label_set_recolor(lbl_pt_status,true);
-  lv_obj_set_style_text_font(lbl_pt_status,&lv_font_montserrat_14,0);
-  lv_label_set_text(lbl_pt_status,"#444444 IDLE#");
-  lv_obj_set_width(lbl_pt_status,SCREEN_W-20);
-  lv_obj_align(lbl_pt_status,LV_ALIGN_TOP_MID,0,42);
+  lv_obj_align(lbl_audit_bssid,LV_ALIGN_TOP_MID,0,24);
+  lbl_audit_status=lv_label_create(tab_audit);
+  lv_label_set_recolor(lbl_audit_status,true);
+  lv_obj_set_style_text_font(lbl_audit_status,&lv_font_montserrat_14,0);
+  lv_label_set_text(lbl_audit_status,"#444444 IDLE#");
+  lv_obj_set_width(lbl_audit_status,SCREEN_W-20);
+  lv_obj_align(lbl_audit_status,LV_ALIGN_TOP_MID,0,42);
   int y=62;
-  btn_deauth=make_atk_btn(tab_pentest,LV_SYMBOL_WARNING   " DEAUTH TEST",   &style_btn_red,   0xFF4444,cb_start_deauth,y); y+=42;
-  btn_beacon=make_atk_btn(tab_pentest,LV_SYMBOL_AUDIO     " BEACON FLOOD",  &style_btn_orange,0xFFAA00,cb_start_beacon,y); y+=42;
-  btn_pmkid =make_atk_btn(tab_pentest,LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE",&style_btn_blue,  0x00AAFF,cb_start_pmkid, y);
-  btn_stop_pt=lv_btn_create(tab_pentest);
-  lv_obj_set_size(btn_stop_pt,SCREEN_W-20,38); lv_obj_align(btn_stop_pt,LV_ALIGN_BOTTOM_MID,0,-52);
-  lv_obj_set_style_bg_color(btn_stop_pt,lv_color_hex(0x1A0000),0);
-  lv_obj_set_style_border_color(btn_stop_pt,lv_color_hex(0xFF0000),0);
-  lv_obj_set_style_border_width(btn_stop_pt,2,0);
-  lv_obj_add_event_cb(btn_stop_pt,cb_stop_pentest,LV_EVENT_CLICKED,nullptr);
-  lv_obj_t *sl2=lv_label_create(btn_stop_pt); lv_label_set_text(sl2,LV_SYMBOL_STOP " STOP");
+  btn_deauth=make_atk_btn(tab_audit,LV_SYMBOL_WARNING   " DEAUTH TEST",   &style_btn_red,   0xFF4444,cb_start_deauth,y); y+=42;
+  btn_beacon=make_atk_btn(tab_audit,LV_SYMBOL_AUDIO     " BEACON FLOOD",  &style_btn_orange,0xFFAA00,cb_start_beacon,y); y+=42;
+  btn_pmkid =make_atk_btn(tab_audit,LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE",&style_btn_blue,  0x00AAFF,cb_start_pmkid, y);
+  btn_stop_audit=lv_btn_create(tab_audit);
+  lv_obj_set_size(btn_stop_audit,SCREEN_W-20,38); lv_obj_align(btn_stop_audit,LV_ALIGN_BOTTOM_MID,0,-52);
+  lv_obj_set_style_bg_color(btn_stop_audit,lv_color_hex(0x1A0000),0);
+  lv_obj_set_style_border_color(btn_stop_audit,lv_color_hex(0xFF0000),0);
+  lv_obj_set_style_border_width(btn_stop_audit,2,0);
+  lv_obj_add_event_cb(btn_stop_audit,cb_stop_pentest,LV_EVENT_CLICKED,nullptr);
+  lv_obj_t *sl2=lv_label_create(btn_stop_audit); lv_label_set_text(sl2,LV_SYMBOL_STOP " STOP");
   lv_obj_set_style_text_color(sl2,lv_color_hex(0xFF0000),0); lv_obj_center(sl2);
-  lv_obj_add_flag(btn_stop_pt,LV_OBJ_FLAG_HIDDEN);
-  lv_obj_t *bbk=lv_btn_create(tab_pentest); lv_obj_set_size(bbk,SCREEN_W-20,36);
+  lv_obj_add_flag(btn_stop_audit,LV_OBJ_FLAG_HIDDEN);
+  lv_obj_t *bbk=lv_btn_create(tab_audit); lv_obj_set_size(bbk,SCREEN_W-20,36);
   lv_obj_align(bbk,LV_ALIGN_BOTTOM_MID,0,-8); lv_obj_add_style(bbk,&style_btn_dark,0);
   lv_obj_add_event_cb(bbk,cb_nav_scan,LV_EVENT_CLICKED,nullptr);
   lv_obj_t *lbbk=lv_label_create(bbk); lv_label_set_text(lbbk,LV_SYMBOL_LEFT " BACK TO SCAN"); lv_obj_center(lbbk);

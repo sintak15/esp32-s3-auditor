@@ -1,5 +1,6 @@
 #include "display.h"
 #include "constants.h"
+#include "src/UIConfig.h"
 #include <TFT_eSPI.h>
 #include <Wire.h>
 #include <esp_heap_caps.h>
@@ -191,11 +192,14 @@ void display_init() {
     lv_indev_drv_register(&indev_drv);
 }
 
-static StatusSnapshot read_status_snapshot() {
+static StatusSnapshot read_status_snapshot(bool *success) {
   StatusSnapshot s = {};
   if (ui_context && ui_context->status.mutex && xSemaphoreTake(ui_context->status.mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
     s = ui_context->status.snap;
     xSemaphoreGive(ui_context->status.mutex);
+    if (success) *success = true;
+  } else if (success) {
+    *success = false;
   }
   return s;
 }
@@ -225,19 +229,24 @@ void ui_update_tick(lv_timer_t *timer) {
 
     t_stage = millis();
     static int last_batteryPct = -1;
+    static uint32_t last_batteryMv = 0;
     static bool last_isCharging = false;
     static bool last_sdMounted = false;
     static int last_batt_col = -1;
 
-    StatusSnapshot ss = read_status_snapshot();
+    bool ss_ok = false;
+    StatusSnapshot ss = read_status_snapshot(&ss_ok);
+    // If mutex is busy, skip this tick to avoid updating the UI with invalid/zeroed data
+    if (!ss_ok) return;
 
     // Battery
-    uint32_t batt_col = ss.batteryPct < 20 ? 0xFF4444 : ss.batteryPct < 50 ? 0xFFFF00 : 0xFFFFFF;
+    // Note: If isCharging stays true after unplugging, check battery level threshold (>100) in producer task.
+    uint32_t batt_col = ss.batteryPct < 20 ? UI::Colors::Error : ss.batteryPct < 50 ? UI::Colors::Warning : UI::Colors::Text;
     if (ss.isCharging) {
-        batt_col = 0x00FF88; // Bright green when charging
+        batt_col = UI::Colors::Success; // Bright green when charging
     }
     
-    if (ss.batteryPct != last_batteryPct || ss.isCharging != last_isCharging) {
+    if (ss.batteryPct != last_batteryPct || ss.isCharging != last_isCharging || ss.batteryMv != last_batteryMv) {
         if (ss.isCharging) {
             lv_label_set_text(lbl_batt, LV_SYMBOL_CHARGE);
         } else {
@@ -247,11 +256,12 @@ void ui_update_tick(lv_timer_t *timer) {
             else if (ss.batteryPct > 15) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_1);
             else lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_EMPTY);
         }
-        char bpbuf[8];
-        snprintf(bpbuf, sizeof(bpbuf), "%d%%", ss.batteryPct);
+        char bpbuf[24];
+        snprintf(bpbuf, sizeof(bpbuf), "%d%% (%.2fV)", ss.batteryPct, (float)ss.batteryMv / 1000.0f);
         lv_label_set_text(lbl_batt_pct, bpbuf);
         last_batteryPct = ss.batteryPct;
         last_isCharging = ss.isCharging;
+        last_batteryMv = ss.batteryMv;
     }
 
     if ((int)batt_col != last_batt_col) {
@@ -261,7 +271,7 @@ void ui_update_tick(lv_timer_t *timer) {
     }
 
     if (ss.sdMounted != last_sdMounted) {
-        lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? 0x00FF88 : 0xFF4444), 0);
+        lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? UI::Colors::Success : UI::Colors::Error), 0);
         last_sdMounted = ss.sdMounted;
     }
 
@@ -411,7 +421,7 @@ void ui_update_tick(lv_timer_t *timer) {
         if (millis() - last_blink > 500) {
             static bool msg_blink = false;
             msg_blink = !msg_blink;
-            int new_color = msg_blink ? 0x00FF88 : 0x444444;
+            int new_color = msg_blink ? UI::Colors::Success : UI::Colors::Secondary;
             if (new_color != last_msg_color) {
                 lv_obj_set_style_text_color(lbl_msg, lv_color_hex(new_color), 0);
                 last_msg_color = new_color;
@@ -420,7 +430,7 @@ void ui_update_tick(lv_timer_t *timer) {
         }
         last_unread_chat = true;
     } else if (last_unread_chat) { // Revert to gray once only
-        if (last_msg_color != 0x444444) {
+        if (last_msg_color != (int)UI::Colors::Secondary) {
             lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0x444444), 0);
             last_msg_color = 0x444444;
         }

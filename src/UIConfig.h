@@ -12,12 +12,15 @@ namespace UI {
 
     // --- Color Palette (RGB565) ---
     namespace Colors {
-        static const uint16_t Primary   = 0x07E0; // Meshtastic Green
-        static const uint16_t Secondary = 0x0410; // Dark Green
-        static const uint16_t Background = 0x0000; // Black
-        static const uint16_t Surface    = 0x2104; // Dark Gray
-        static const uint16_t Text       = 0xFFFF; // White
-        static const uint16_t Warning    = 0xF800; // Red
+        static const uint32_t Primary    = 0x00FF88; // Meshtastic Mint Green
+        static const uint32_t Secondary  = 0x444444; // Medium Gray
+        static const uint32_t Background = 0x000000; // Black
+        static const uint32_t Surface    = 0x212121; // Dark Gray
+        static const uint32_t Text       = 0xFFFFFF; // White
+        
+        static const uint32_t Success    = 0x00FF88; // Green/Mint
+        static const uint32_t Warning    = 0xFFFF00; // Yellow
+        static const uint32_t Error      = 0xFF4444; // Red
     }
 
     // --- Layout & Uniformity ---
@@ -47,11 +50,11 @@ namespace UI {
 
     // --- Soft Terminology ---
     namespace Labels {
-        static const char* AppTitle     = "System Auditor";
+        static const char* AppTitle     = "Network Auditor";
         static const char* AuditTask    = "Network Audit";
         static const char* AuditNode    = "Node Auditor";
         static const char* StatusRun    = "Auditing...";
-        static const char* LogLabel     = "Audit Logs";
+        static const char* LogLabel     = "Activity Logs";
     }
 
     /**

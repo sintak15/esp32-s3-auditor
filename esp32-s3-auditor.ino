@@ -1,5 +1,5 @@
 /**
- * ESP32-S3 Pentest Suite — Refactored
+ * ESP32-S3 Auditor Suite — Refactored
  *
  * This is the main entry point for the application. It initializes all modules,
  * sets up the tasks and timers, and runs the main processing loop.
@@ -22,6 +22,7 @@
 #include "src/meshtastic/mesh.pb.h"
 #include "src/meshtastic/telemetry.pb.h"
 #include "src/meshtastic/portnums.pb.h"
+#include "src/MeshProtobufUtils.h"
 
 #include "constants.h"
 // #include "state.h" // REMOVED: Redundant, use types.h
@@ -365,11 +366,12 @@ void process_ui_queue() {
 //             Benign Service Tasks
 // ──────────────────────────────────────────────
 
-static void write_status_snapshot(bool sdMounted, int batteryPct, bool isCharging) {
+static void write_status_snapshot(bool sdMounted, int batteryPct, bool isCharging, uint32_t batteryMv) {
     if (g_app_context.status.mutex && xSemaphoreTake(g_app_context.status.mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
         g_app_context.status.snap.sdMounted = sdMounted;
         g_app_context.status.snap.batteryPct = batteryPct;
         g_app_context.status.snap.isCharging = isCharging;
+        g_app_context.status.snap.batteryMv = batteryMv;
         xSemaphoreGive(g_app_context.status.mutex);
     }
 }
@@ -378,9 +380,14 @@ void status_service_task(void *pv) {
     uint32_t sd_retry_ms = 0;
 
     for (;;) {
-        float v = (analogRead(BATT_ADC) / 4095.0f) * 3.3f * 2.0f;
-        int newBattPct = constrain((int)((v - 3.3f) / 0.9f * 100.0f), 0, 100); // Corrected to use g_app_context
-        bool charging = (v > 4.25f); // LiPo max is ~4.2V; anything higher typically indicates USB charging
+        // Use analogReadMilliVolts for factory-calibrated accuracy on S3
+        // Multi-sample to eliminate noise flicker in the UI
+        uint32_t avg_mv = 0;
+        for(int i=0; i<10; i++) avg_mv += analogReadMilliVolts(BATT_ADC);
+        uint32_t mv = (avg_mv / 10) * 2; // ADC is on a 1:2 divider
+
+        int newBattPct = MeshUtils::mvoltsToPct(mv);
+        bool charging = MeshUtils::isHardwareCharging(mv);
 
         if (!sd_card_ready() && millis() - sd_retry_ms > 5000) {
             if (!g_app_context.sniffer.pcap_active && 
@@ -391,7 +398,7 @@ void status_service_task(void *pv) {
                 sd_reinit();
             }
         }
-        write_status_snapshot(sd_card_ready(), newBattPct, charging);
+        write_status_snapshot(sd_card_ready(), newBattPct, charging, mv);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -747,14 +754,14 @@ void cb_net_selected(lv_event_t *e) {
     char bss[18]; // Corrected to use g_app_context
     sprintf(bss, "%02X:%02X:%02X:%02X:%02X:%02X", g_app_context.wifi_scan.ap_list[idx].bssid[0], g_app_context.wifi_scan.ap_list[idx].bssid[1], g_app_context.wifi_scan.ap_list[idx].bssid[2], g_app_context.wifi_scan.ap_list[idx].bssid[3], g_app_context.wifi_scan.ap_list[idx].bssid[4], g_app_context.wifi_scan.ap_list[idx].bssid[5]);
 
-    lv_label_set_text_fmt(lbl_pt_target, "#00FFCC TARGET:#  %s", g_app_context.wifi_scan.ap_list[idx].ssid);
-    lv_label_set_text_fmt(lbl_pt_bssid, "BSSID: %s  CH:%d", bss, g_app_context.wifi_scan.ap_list[idx].channel);
-    lv_label_set_text(lbl_pt_status, "#444444 IDLE - choose pentest#");
+    lv_label_set_text_fmt(lbl_audit_target, "#00FFCC TARGET:#  %s", g_app_context.wifi_scan.ap_list[idx].ssid);
+    lv_label_set_text_fmt(lbl_audit_bssid, "BSSID: %s  CH:%d", bss, g_app_context.wifi_scan.ap_list[idx].channel);
+    lv_label_set_text(lbl_audit_status, "#444444 IDLE - choose audit task#");
     
     lv_obj_clear_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(btn_stop_pt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 
     navigate_to(2);
 }
@@ -990,7 +997,7 @@ void wake_meshtastic_node() {
 //              Web Server Handlers
 // ──────────────────────────────────────────────
 void handleRoot() {
-    String html = "<html><head><title>Pentest SD</title><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body style='font-family:sans-serif; background:#111; color:#fff;'><h1>SD Card Files</h1><ul>";
+    String html = "<html><head><title>Auditor Storage</title><meta name='viewport' content='width=device-width, initial-scale=1.0'></head><body style='font-family:sans-serif; background:#111; color:#fff;'><h1>SD Card Files</h1><ul>";
     File root = SD_MMC.open("/");
     if (!root) { server.send(500, "text/plain", "SD Card not ready"); return; }
     File file = root.openNextFile();
@@ -1021,7 +1028,7 @@ void toggle_web_server() {
     g_app_context.web_server_active = !g_app_context.web_server_active;
     if (g_app_context.web_server_active) {
         WiFi.mode(WIFI_AP);
-        WiFi.softAP("Pentester_Admin", "12345678");
+        WiFi.softAP("Auditor_Admin", "12345678");
         server.on("/", handleRoot);
         server.on("/dl", handleDownload);
         server.begin();
@@ -1247,7 +1254,7 @@ void setup() {
     g_app_context.web_server_active = false;
     g_app_context.ui_busy = false;
     
-    write_status_snapshot(sd_card_ready(), 100, false); // Corrected to use g_app_context
+    write_status_snapshot(sd_card_ready(), 100, false, 4200); // Corrected to use g_app_context
 
     // Initialize modules
     wifi_scanner_init(&g_app_context);
@@ -1280,7 +1287,7 @@ void setup() {
     // Wake up the connected LoRa node
     wake_meshtastic_node();
 
-    Serial.println("ESP32-S3 Pentest ready (Refactored).");
+    Serial.println("ESP32-S3 Auditor ready (Refactored).");
     
     static uint8_t* local_ui_queue_storage = (uint8_t*)ps_malloc(15 * sizeof(LocalUiEvent));
     static StaticQueue_t* local_ui_queue_buffer = (StaticQueue_t*)ps_malloc(sizeof(StaticQueue_t));

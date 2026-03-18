@@ -1,6 +1,6 @@
-# ESP32-S3 Pentester (Refactored)
+# ESP32-S3 Auditor (Refactored)
 
-A high-performance ESP32-S3-based wireless analysis and testing toolkit featuring Wi-Fi scanning, BLE sniffing/flooding, LoRa support, SD logging, and a real-time LVGL UI.
+A high-performance ESP32-S3-based wireless analysis and auditing toolkit featuring Wi-Fi scanning, BLE sniffing/flooding, LoRa support, SD logging, and a real-time LVGL UI.
 
 This version is heavily refactored for stability, performance, and memory safety.
 
@@ -18,7 +18,7 @@ This version is heavily refactored for stability, performance, and memory safety
 
 ### 📶 BLE
 - BLE advertisement sniffing (NimBLE-based)
-- BLE flood (advertising spam testing)
+- BLE resilience testing (advertising flood audit)
 - Fixed-size unique device tracking (no heap fragmentation)
 - Ring-buffer packet pipeline
 - SD logging support
