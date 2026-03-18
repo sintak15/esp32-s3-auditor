@@ -28,6 +28,13 @@ extern lv_obj_t *battery_stats_panel;
 extern lv_obj_t *lbl_battery_stats;
 extern lv_obj_t *ui_battery_chart;
 extern lv_chart_series_t *ui_battery_series;
+extern lv_obj_t *about_panel;
+extern lv_obj_t *lbl_firmware_version;
+extern lv_obj_t *lbl_build_date;
+extern lv_obj_t *lbl_device_id;
+extern lv_obj_t *lbl_current_sha256;
+extern lv_obj_t *lbl_ota_status;
+extern lv_obj_t *lbl_ota_progress;
 extern lv_chart_series_t *ui_heap_series;
 
 extern void trace_enter(const char *s);
@@ -240,6 +247,7 @@ void ui_update_tick(lv_timer_t *timer) {
     static int last_batteryPct = -1;
     static uint32_t last_batteryMv = 0;
     static bool last_isCharging = false;
+    static int last_batteryTempC = -1;
     static bool last_sdMounted = false;
     static int last_batt_col = -1;
 
@@ -271,6 +279,7 @@ void ui_update_tick(lv_timer_t *timer) {
         last_batteryPct = ss.batteryPct;
         last_isCharging = ss.isCharging;
         last_batteryMv = ss.batteryMv;
+        last_batteryTempC = ss.batteryTempC;
     }
 
     // Toggle Low Battery Alert Border
@@ -283,6 +292,19 @@ void ui_update_tick(lv_timer_t *timer) {
             lv_obj_set_style_border_opa(low_batt_border, opa, 0);
         } else {
             lv_obj_add_flag(low_batt_border, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // Toggle Temperature Warning Border
+    if (temp_warning_border) {
+        bool is_hot = (ss.isCharging && ss.batteryTempC >= 45); // Warning if charging and >= 45C
+        if (is_hot) {
+            lv_obj_clear_flag(temp_warning_border, LV_OBJ_FLAG_HIDDEN);
+            // Create a pulsing effect using a triangle wave
+            int opa = 100 + (abs((int)(millis() % 2000) - 1000) / 10); 
+            lv_obj_set_style_border_opa(temp_warning_border, opa, 0);
+        } else {
+            lv_obj_add_flag(temp_warning_border, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
@@ -526,7 +548,8 @@ void ui_update_tick(lv_timer_t *timer) {
                 "#00FF88 Power Rail Info#\n\n"
                 "#AAAAAA Voltage:#   #FFFFFF %.2f V#\n"
                 "#AAAAAA Capacity:#  #FFFFFF %d %%#\n"
-                "#AAAAAA Status:#    #FFFFFF %s#\n\n"
+                "#AAAAAA Status:#    #FFFFFF %s#\n"
+                "#AAAAAA Temp:#      #FFFFFF %d C#\n\n"
                 "#AAAAAA Learned 100%%:# #00FF88 %.2f V#\n"
                 "#AAAAAA ADC Pin:#   #FFFFFF GPIO %d#\n"
                 "#AAAAAA V-Divider:# #FFFFFF 1:2 (100k)#\n\n"
@@ -534,6 +557,7 @@ void ui_update_tick(lv_timer_t *timer) {
                 (float)ss.batteryMv / 1000.0f,
                 ss.batteryPct,
                 ss.isCharging ? "USB Connected (Charging)" : "On Battery",
+                ss.batteryTempC,
                 (float)g_app_context.status.calibrated_max_mv / 1000.0f,
                 BATT_ADC);
             lv_label_set_text(lbl_battery_stats, buf);
@@ -551,6 +575,20 @@ void ui_update_tick(lv_timer_t *timer) {
             last_sys_stats_draw = millis();
         }
     }
+
+    // Update About Panel if visible
+    if (tabview && lv_tabview_get_tab_act(tabview) == 13 && about_panel) {
+        static bool initialized = false;
+        if (!initialized) {
+            // Only set these once as they are static
+            lv_label_set_text_fmt(lbl_firmware_version, "#AAAAAA Firmware:# #FFFFFF %s#", FIRMWARE_VERSION);
+            lv_label_set_text_fmt(lbl_build_date, "#AAAAAA Build Date:# #FFFFFF %s %s#", __DATE__, __TIME__);
+            lv_label_set_text_fmt(lbl_device_id, "#AAAAAA Device ID:# #FFFFFF %s#", g_app_context.device_id.c_str());
+            initialized = true;
+        }
+    }
+
+
 
     // Update GPS Panel if visible
     if (tabview && lv_tabview_get_tab_act(tabview) == 8 && lbl_gps_data) {

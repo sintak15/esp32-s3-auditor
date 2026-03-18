@@ -56,6 +56,13 @@
 #define MAX_BEACON_SSIDS 10
 #define MAX_BEACON_SSID_LENGTH 32
 
+// OTA Update Settings
+#define FIRMWARE_VERSION_URL "https://raw.githubusercontent.com/YOUR_GITHUB_USER/YOUR_REPO/main/firmware_version.txt" // URL to a text file with the latest version number
+#define FIRMWARE_BINARY_URL "https://github.com/YOUR_GITHUB_USER/YOUR_REPO/releases/download/v%s/firmware.bin" // URL to the .bin file, %s will be replaced by version
+#define OTA_WIFI_SSID "YourWiFiSSID" // WiFi SSID for OTA updates
+#define OTA_WIFI_PASS "YourWiFiPassword" // WiFi Password for OTA updates
+#define MAX_BEACON_SSID_LENGTH 32
+
 // SD Logger File Names
 #define WIFI_SCAN_LOG "/WIFI_SCAN.CSV"
 #define PMKID_HASH_LOG "/PMKID.hc22000"

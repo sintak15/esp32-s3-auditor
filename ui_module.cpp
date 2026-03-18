@@ -56,6 +56,8 @@ lv_obj_t *about_panel = nullptr;
 lv_obj_t *lbl_firmware_version = nullptr;
 lv_obj_t *lbl_build_date = nullptr;
 lv_obj_t *lbl_device_id = nullptr;
+lv_obj_t *lbl_ota_status = nullptr;
+lv_obj_t *lbl_ota_progress = nullptr;
 
 extern void toggle_web_server();
 extern void spoof_mac();
@@ -640,6 +642,23 @@ void ui_build() {
   lbl_device_id = lv_label_create(about_panel);
   lv_label_set_text(lbl_device_id, "Platform: Arduino IDE");
   lv_obj_align(lbl_device_id, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 80);
+
+  lv_obj_t *btn_update_firmware = lv_btn_create(about_panel);
+  lv_obj_set_size(btn_update_firmware, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
+  lv_obj_align(btn_update_firmware, LV_ALIGN_TOP_MID, 0, 120);
+  lv_obj_add_style(btn_update_firmware, &style_btn_blue, 0);
+  lv_obj_add_event_cb(btn_update_firmware, [](lv_event_t *e) {
+      extern void start_ota_task();
+      start_ota_task();
+  }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lbl_update_firmware = lv_label_create(btn_update_firmware); lv_label_set_text(lbl_update_firmware, LV_SYMBOL_DOWNLOAD " UPDATE FIRMWARE"); lv_obj_center(lbl_update_firmware);
+
+  lbl_ota_status = lv_label_create(about_panel);
+  lv_label_set_text(lbl_ota_status, "");
+  lv_obj_align(lbl_ota_status, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 160);
+  lbl_ota_progress = lv_label_create(about_panel);
+  lv_label_set_text(lbl_ota_progress, "");
+  lv_obj_align(lbl_ota_progress, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 180);
 
   lv_obj_t *btn_reset_cal = lv_btn_create(about_panel);
   lv_obj_set_size(btn_reset_cal, SCREEN_W - (UI::Layout::Margin * 2), 30);

@@ -11,6 +11,8 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <WebServer.h>
+#include <HTTPClient.h> // For OTA
+#include <Update.h>     // For OTA
 #include <SD_MMC.h>
 #include <nvs_flash.h> // For NVS initialization
 #include <esp_heap_caps.h> // For heap diagnostics
@@ -62,6 +64,8 @@ extern lv_obj_t *btn_stop_audit;
 extern lv_obj_t *lbl_firmware_version;
 extern lv_obj_t *lbl_build_date;
 extern lv_obj_t *lbl_device_id;
+extern lv_obj_t *lbl_ota_status;
+extern lv_obj_t *lbl_ota_progress;
 extern lv_obj_t *tabview;
 
 // ──────────────────────────────────────────────
@@ -386,6 +390,111 @@ void reset_battery_calibration() {
         nvs_close(nvs);
     }
     g_app_context.status.calibrated_max_mv = 4050; // Reset to safe default
+}
+
+void ota_task(void *pvParameters) {
+    g_app_context.ota_active = true;
+    strlcpy(g_app_context.ota_status_message, "Connecting to WiFi...", sizeof(g_app_context.ota_status_message));
+    g_app_context.ota_progress_pct = 0;
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(OTA_WIFI_SSID, OTA_WIFI_PASS);
+
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        attempts++;
+        g_app_context.ota_progress_pct = attempts * 5; // 5% per attempt
+        snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Connecting... %d%%", g_app_context.ota_progress_pct);
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        strlcpy(g_app_context.ota_status_message, "WiFi failed!", sizeof(g_app_context.ota_status_message));
+        g_app_context.ota_active = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    strlcpy(g_app_context.ota_status_message, "WiFi connected. Checking version...", sizeof(g_app_context.ota_status_message));
+    g_app_context.ota_progress_pct = 10;
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    HTTPClient http;
+    http.begin(FIRMWARE_VERSION_URL);
+    int httpCode = http.GET();
+
+    if (httpCode == HTTP_CODE_OK) {
+        String newVersionStr = http.getString();
+        newVersionStr.trim();
+        Serial.printf("[OTA] Latest version: %s, Current: %s\n", newVersionStr.c_str(), FIRMWARE_VERSION);
+
+        if (newVersionStr.equals(FIRMWARE_VERSION)) {
+            strlcpy(g_app_context.ota_status_message, "Already up to date!", sizeof(g_app_context.ota_status_message));
+            g_app_context.ota_active = false;
+            http.end();
+            vTaskDelete(NULL);
+            return;
+        }
+
+        strlcpy(g_app_context.ota_status_message, "New version found! Downloading...", sizeof(g_app_context.ota_status_message));
+        g_app_context.ota_progress_pct = 20;
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        char firmwareUrl[256];
+        snprintf(firmwareUrl, sizeof(firmwareUrl), FIRMWARE_BINARY_URL, newVersionStr.c_str());
+        http.begin(firmwareUrl);
+        httpCode = http.GET();
+
+        if (httpCode == HTTP_CODE_OK) {
+            int contentLength = http.getSize();
+            bool canBegin = Update.begin(contentLength);
+
+            if (canBegin) {
+                WiFiClient& client = http.getStream();
+                size_t written = Update.write(client);
+
+                if (written == contentLength) {
+                    strlcpy(g_app_context.ota_status_message, "Download complete. Updating...", sizeof(g_app_context.ota_status_message));
+                    g_app_context.ota_progress_pct = 90;
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+
+                    if (Update.end()) {
+                        if (Update.is  Committed()) {
+                            strlcpy(g_app_context.ota_status_message, "Update successful! Rebooting...", sizeof(g_app_context.ota_status_message));
+                            g_app_context.ota_progress_pct = 100;
+                            vTaskDelay(pdMS_TO_TICKS(2000));
+                            ESP.restart();
+                        } else {
+                            strlcpy(g_app_context.ota_status_message, "Update not committed!", sizeof(g_app_context.ota_status_message));
+                        }
+                    } else {
+                        snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Update failed! Error: %d", Update.getError());
+                    }
+                } else {
+                    snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Download failed! Written: %zu/%d", written, contentLength);
+                }
+            } else {
+                strlcpy(g_app_context.ota_status_message, "Not enough space for OTA!", sizeof(g_app_context.ota_status_message));
+            }
+        } else {
+            snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Firmware download failed! Code: %d", httpCode);
+        }
+    } else {
+        snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Version check failed! Code: %d", httpCode);
+    }
+
+    http.end();
+    WiFi.disconnect(true);
+    g_app_context.ota_active = false;
+    vTaskDelete(NULL);
+}
+
+void start_ota_task() {
+    if (g_app_context.ota_active) {
+        Serial.println("[OTA] Update already in progress.");
+        return;
+    }
+    xTaskCreatePinnedToCore(ota_task, "ota_task", 8192, NULL, 5, NULL, 0); // Run on Core 0, higher priority
 }
 
 void load_battery_calibration() {
