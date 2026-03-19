@@ -39,5 +39,5 @@ Identify hidden network usage and mobile device presence.
 
 ## **Workflow 5: Power Management**
 
-1. **Sleep:** The device enters deep sleep after 5 minutes of inactivity to save battery.  
-2. **Wake:** Simply tap the screen to trigger the **TP\_INT** pin and resume your session instantly.
+1. **Screen timeout:** The backlight turns off after 10 minutes of inactivity to save battery.  
+2. **Wake:** Tap the screen to restore brightness and continue.

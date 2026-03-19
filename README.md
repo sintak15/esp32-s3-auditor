@@ -1,67 +1,53 @@
-# ESP32-S3 Pentester (Refactored)
+# ESP32-S3 Auditor Suite
 
-A high-performance ESP32-S3-based wireless analysis and testing toolkit featuring Wi-Fi scanning, BLE sniffing/flooding, LoRa support, SD logging, and a real-time LVGL UI.
+Touchscreen toolkit for the ESP32-S3 (CYD/S3 hardware) focused on authorized wireless security auditing and Meshtastic (LoRa) serial integration.
 
-This version is heavily refactored for stability, performance, and memory safety.
+## Disclaimer
+This project is intended for educational use and authorized testing only. You are responsible for complying with local laws and getting explicit permission before testing any network or device you do not own.
 
----
+## Features (high level)
+- WiFi scan (AP / STA / Linked)
+- Audit actions (deauth, beacon flood, PMKID capture)
+- PCAP capture + probe request sniffing to SD
+- BLE sniffing + flood testing
+- Meshtastic (LoRa) serial UI (terminal/chat/stats/nodedb)
 
-## 🚀 Features
+## Arduino IDE setup
+### Board manager
+1. Arduino IDE -> File > Preferences
+2. Add to Additional Board Manager URLs:
+   `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
+3. Install `esp32` by Espressif (tested with 3.3.7)
 
-### 📡 Wi-Fi
-- Active AP scanning
-- Station (client) detection
-- AP ↔ client association mapping (linked view)
-- Channel hopping
-- Promiscuous mode capture
-- PCAP queue pipeline (for logging/export)
+### Board settings (known-good baseline)
+- Board: ESP32S3 Dev Module
+- USB CDC On Boot: Enabled
+- Flash Size: 16MB
+- Partition Scheme: 16M Flash (3MB APP/9MB FATFS)
+- PSRAM: OPI PSRAM
+- CPU Frequency: 240MHz
 
-### 📶 BLE
-- BLE advertisement sniffing (NimBLE-based)
-- BLE flood (advertising spam testing)
-- Fixed-size unique device tracking (no heap fragmentation)
-- Ring-buffer packet pipeline
-- SD logging support
+### Libraries
+Install via Tools > Manage Libraries:
+- lvgl (8.3.x)
+- TFT_eSPI (2.5.x)
+- NimBLE-Arduino (2.3.x)
+- Nanopb (required for Meshtastic protobuf; provides `pb_encode.h` / `pb_decode.h`)
 
-### 📻 LoRa
-- Packet decoding pipeline
-- Background service task
-- UI + logging integration
+This repo includes:
+- `lv_conf.h` (LVGL config) - copy into your `lvgl` library folder if needed
+- `User_Setup.h` (TFT_eSPI setup) - copy into your `TFT_eSPI` library folder if needed
 
-### 💾 Storage
-- SD card logging (Wi-Fi + BLE)
-- FAT partition support
-- Non-blocking logging pipeline
+## Build / flash
+1. Open `esp32-s3-auditor.ino` in Arduino IDE.
+2. Confirm `constants.h` matches your pinout/hardware.
+3. Click Upload.
 
-### 🖥 UI (LVGL)
-- Real-time scan display
-- Multi-tab interface
-- Touch-safe rendering (no redraw during scroll)
-- Fixed object pools (no LVGL fragmentation)
+## Usage guide
+See `workflows.md` for suggested operational workflows.
 
----
+## Troubleshooting
+- Boot loops: usually PSRAM config mismatch (ensure OPI PSRAM).
+- SD failures: format FAT32 and verify wiring/pin config.
+- LoRa/Meshtastic: requires an external Meshtastic node connected over UART and configured for serial.
 
-## 🧠 Architecture
-
-### RTOS Task Layout
-
-| Task | Core | Purpose |
-|------|------|--------|
-| main_app_task | 0 | UI + coordination |
-| ble_task | 0 | BLE control + flood |
-| lora_service_task | 1 | LoRa processing |
-| LVGL timer | 1 | UI rendering |
-
----
-
-## 📜 License (MIT)
-
-MIT License
-
-Copyright (c) 2026 Justin Stephenson
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
