@@ -1164,6 +1164,13 @@ void toggle_web_server() {
 //             Diagnostics Helpers
 // ──────────────────────────────────────────────
 
+void reboot_cyd() {
+    Serial.println("[SYSTEM] Reboot requested");
+    Serial.flush();
+    delay(100);
+    ESP.restart();
+}
+
 void add_bc(const char* fmt, ...) {
     return; // Disabled - breadcrumbs were for debugging only
 }

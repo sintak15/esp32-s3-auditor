@@ -44,6 +44,7 @@ lv_obj_t *lbl_gps_data = nullptr;
 lv_obj_t *lbl_pcap_status = nullptr; // Corrected to be a single declaration
 lv_obj_t *low_batt_border = nullptr;
 lv_obj_t *battery_stats_panel = nullptr;
+lv_obj_t *reboot_panel = nullptr;
 lv_obj_t *lbl_battery_stats = nullptr;
 lv_obj_t *ui_battery_chart = nullptr;
 lv_chart_series_t *ui_battery_series = nullptr;
@@ -61,6 +62,7 @@ lv_obj_t *ta_sys_stats = nullptr;
 
 extern void toggle_web_server();
 extern void spoof_mac();
+extern void reboot_cyd();
 
 lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
            style_btn_blue, style_view_active, style_view_inactive;
@@ -180,9 +182,10 @@ void ui_build() {
   diagnostics_panel = lv_tabview_add_tab(tabview, "Diag");  // Index 10
   sys_stats_panel   = lv_tabview_add_tab(tabview, "Perf");  // Index 11
   battery_stats_panel = lv_tabview_add_tab(tabview, "Batt");// Index 12
+  reboot_panel = lv_tabview_add_tab(tabview, "Reboot");     // Index 13
   
   lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,
-                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, tv_cont};
+                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, reboot_panel, tv_cont};
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
@@ -462,6 +465,11 @@ void ui_build() {
   }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 3); // Corrected y position
   lv_obj_clear_flag(btn_open_batt_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_batt_stats,0), lv_color_hex(UI::Colors::Success), 0);
 
+  lv_obj_t *btn_open_reboot = make_atk_btn(tab_settings, LV_SYMBOL_POWER " REBOOT", &style_btn_dark, 0xFF4444, [](lv_event_t *e) {
+      navigate_to(13);
+  }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 4);
+  lv_obj_clear_flag(btn_open_reboot, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_reboot,0), lv_color_hex(UI::Colors::Error), 0);
+
   // Brightness Slider
   lv_obj_t *slider_bright = lv_slider_create(tab_settings);
   lv_obj_set_size(slider_bright, SCREEN_W - 60, 12);
@@ -474,7 +482,7 @@ void ui_build() {
   }, LV_EVENT_VALUE_CHANGED, nullptr);
   lv_obj_t *lbl_br = lv_label_create(tab_settings);
   lv_label_set_text(lbl_br, LV_SYMBOL_SETTINGS " SCREEN BRIGHTNESS");
-  lv_obj_align_to(lbl_br, slider_bright, LV_ALIGN_OUT_TOP_MID, 0, -5);
+  lv_obj_align_to(lbl_br, slider_bright, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
 
   add_return_btn(tab_settings);
 
@@ -673,6 +681,43 @@ void ui_build() {
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lbl_no = lv_label_create(btn_confirm_no); lv_label_set_text(lbl_no, LV_SYMBOL_CLOSE " NO"); lv_obj_center(lbl_no);
 
+  // --- Reboot Sub-Tab ---
+  lv_obj_set_style_bg_color(reboot_panel, lv_color_hex(UI::Colors::Background), 0);
+  lv_obj_set_style_border_color(reboot_panel, lv_color_hex(UI::Colors::Error), 0);
+  lv_obj_set_style_border_width(reboot_panel, 2, 0);
+
+  lv_obj_t *lbl_reboot_title = lv_label_create(reboot_panel);
+  lv_label_set_text(lbl_reboot_title, "#FF4444 " LV_SYMBOL_POWER " REBOOT#");
+  lv_label_set_recolor(lbl_reboot_title, true);
+  lv_obj_align(lbl_reboot_title, LV_ALIGN_TOP_MID, 0, 0);
+
+  lv_obj_t *lbl_reboot_msg = lv_label_create(reboot_panel);
+  lv_label_set_recolor(lbl_reboot_msg, true);
+  lv_label_set_text(lbl_reboot_msg, "#AAAAAA Reboot the CYD to recover from\\nWiFi/BLE stack issues or apply\\nlow-level changes.#");
+  lv_obj_set_width(lbl_reboot_msg, SCREEN_W - (UI::Layout::Margin * 2));
+  lv_label_set_long_mode(lbl_reboot_msg, LV_LABEL_LONG_WRAP);
+  lv_obj_align(lbl_reboot_msg, LV_ALIGN_TOP_MID, 0, 40);
+
+  lv_obj_t *btn_reboot = lv_btn_create(reboot_panel);
+  lv_obj_set_size(btn_reboot, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
+  lv_obj_align(btn_reboot, LV_ALIGN_BOTTOM_MID, 0, -50);
+  lv_obj_add_style(btn_reboot, &style_btn_red, 0);
+  lv_obj_add_event_cb(btn_reboot, [](lv_event_t *e) {
+      lv_obj_t *btn = lv_event_get_current_target(e);
+      if (btn) {
+          lv_obj_t *lbl = lv_obj_get_child(btn, 0);
+          if (lbl) lv_label_set_text(lbl, "REBOOTING...");
+      }
+      // Give LVGL a moment to repaint before restarting.
+      lv_timer_create([](lv_timer_t *t) {
+          (void)t;
+          reboot_cyd();
+      }, 250, nullptr);
+  }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lbl_reboot = lv_label_create(btn_reboot); lv_label_set_text(lbl_reboot, LV_SYMBOL_POWER " REBOOT NOW"); lv_obj_center(lbl_reboot);
+
+  add_settings_back_btn(reboot_panel);
+
   // --- LoRa Stats Modal Panel ---
   lora_stats_panel = lv_obj_create(main_screen);
   lv_obj_set_size(lora_stats_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight); // Cover everything under status bar
@@ -695,6 +740,9 @@ void ui_build() {
   
   lv_obj_t *btn_close_stats = lv_btn_create(lora_stats_panel);
   lv_obj_set_size(btn_close_stats, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); // Standardized size
+  lv_obj_add_flag(btn_close_stats, LV_OBJ_FLAG_IGNORE_LAYOUT);
+  lv_obj_align(btn_close_stats, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
+  lv_obj_add_style(btn_close_stats, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_stats, [](lv_event_t *e) {
       if (lora_stats_panel) lv_obj_add_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN);
   }, LV_EVENT_CLICKED, nullptr);
@@ -718,13 +766,16 @@ void ui_build() {
   lv_obj_align(lbl_nodedb_title, LV_ALIGN_TOP_MID, 0, 0);
 
   nodedb_list = lv_textarea_create(lora_nodedb_panel);
-  lv_obj_set_size(nodedb_list, SCREEN_W - 20, SCREEN_H - 100);
+  lv_obj_set_size(nodedb_list, SCREEN_W - 20, SCREEN_H - 110);
   lv_obj_align(nodedb_list, LV_ALIGN_TOP_MID, 0, 30);
   lv_textarea_set_text(nodedb_list, "Waiting for nodes...\n");
   lv_obj_clear_flag(nodedb_list, LV_OBJ_FLAG_CLICK_FOCUSABLE);
   
   lv_obj_t *btn_close_nodedb = lv_btn_create(lora_nodedb_panel);
   lv_obj_set_size(btn_close_nodedb, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); // Standardized size
+  lv_obj_add_flag(btn_close_nodedb, LV_OBJ_FLAG_IGNORE_LAYOUT);
+  lv_obj_align(btn_close_nodedb, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
+  lv_obj_add_style(btn_close_nodedb, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_nodedb, [](lv_event_t *e) {
       lv_obj_add_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN);
   }, LV_EVENT_CLICKED, nullptr);
@@ -765,6 +816,7 @@ void ui_build() {
   lv_obj_clear_flag(btn_lora_send, LV_OBJ_FLAG_HIDDEN);
   lv_obj_t *btn_close_log = lv_btn_create(lora_log_panel); // Corrected to be a single declaration
   lv_obj_set_size(btn_close_log, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
+  lv_obj_add_flag(btn_close_log, LV_OBJ_FLAG_IGNORE_LAYOUT);
   lv_obj_align(btn_close_log, LV_ALIGN_BOTTOM_LEFT, UI::Layout::Margin, -UI::Layout::Padding);
   lv_obj_add_style(btn_close_log, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_log, [](lv_event_t *e) {
@@ -774,6 +826,7 @@ void ui_build() {
 
   lv_obj_t *btn_lora_clear = lv_btn_create(lora_log_panel); // Corrected to be a single declaration
   lv_obj_set_size(btn_lora_clear, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
+  lv_obj_add_flag(btn_lora_clear, LV_OBJ_FLAG_IGNORE_LAYOUT);
   lv_obj_align(btn_lora_clear, LV_ALIGN_BOTTOM_RIGHT, -UI::Layout::Margin, -UI::Layout::Padding);
   lv_obj_add_style(btn_lora_clear, &style_btn_red, 0);
   lv_obj_add_event_cb(btn_lora_clear, [](lv_event_t *e) {
@@ -818,6 +871,7 @@ void ui_build() {
   lv_obj_clear_flag(btn_lora_chat_send, LV_OBJ_FLAG_HIDDEN);
   lv_obj_t *btn_close_chat = lv_btn_create(lora_chat_panel); // Corrected to be a single declaration
   lv_obj_set_size(btn_close_chat, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
+  lv_obj_add_flag(btn_close_chat, LV_OBJ_FLAG_IGNORE_LAYOUT);
   lv_obj_align(btn_close_chat, LV_ALIGN_BOTTOM_LEFT, UI::Layout::Margin, -UI::Layout::Padding);
   lv_obj_add_style(btn_close_chat, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_chat, [](lv_event_t *e) {
@@ -826,6 +880,7 @@ void ui_build() {
   lv_obj_t *lbl_close_chat = lv_label_create(btn_close_chat); lv_label_set_text(lbl_close_chat, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_chat);
   lv_obj_t *btn_lora_chat_clear = lv_btn_create(lora_chat_panel); // Corrected to be a single declaration
   lv_obj_set_size(btn_lora_chat_clear, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
+  lv_obj_add_flag(btn_lora_chat_clear, LV_OBJ_FLAG_IGNORE_LAYOUT);
   lv_obj_align(btn_lora_chat_clear, LV_ALIGN_BOTTOM_RIGHT, -UI::Layout::Margin, -UI::Layout::Padding);
   lv_obj_add_style(btn_lora_chat_clear, &style_btn_red, 0);
   lv_obj_add_event_cb(btn_lora_chat_clear, [](lv_event_t *e) {
