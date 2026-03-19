@@ -158,14 +158,14 @@ void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl
         for (int i = 0; i < n; i++) sprintf(o + i * 2, "%02x", b[i]);
         o[n * 2] = 0;
     };
-    char ph[33], ah[13], ch[13], sh[65];
+    char ph[33], ah[13], ch[13];
     hex(pmkid, 16, ph);
     hex(ap_mac, 6, ah);
     hex(cl_mac, 6, ch);
 
     LogMsg msg1;
     msg1.target = LOG_TARGET_PMKID_HASH;
-    snprintf(msg1.line, sizeof(msg1.line), "PMKID*%s*%s*%s\n", ph, ah, ssid); // Hashcat expects raw SSID
+    snprintf(msg1.line, sizeof(msg1.line), "PMKID*%s*%s*%s*%s\n", ph, ah, ch, ssid); // Hashcat expects raw SSID
     if (xQueueSend(sd_log_queue, &msg1, 0) != pdPASS) {
         Serial.println("[SD_LOG] Warning: Queue full, dropped PMKID Hashcat log.");
     }

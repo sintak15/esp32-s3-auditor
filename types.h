@@ -114,7 +114,10 @@ struct AuditState {
   lv_timer_t* audit_timer;
   int beacon_idx;
   bool pmkid_found;
-  uint8_t pmkid_target_bssid[6]; // Used in pentest_attacks.cpp
+  char pmkid_target_ssid[33];
+  uint8_t pmkid_value[16];
+  uint8_t pmkid_sta_mac[6];
+  uint8_t pmkid_target_bssid[6];
   std::vector<String, PsramAllocator<String>> custom_beacon_ssids; // For user-defined beacon SSIDs
 };
 

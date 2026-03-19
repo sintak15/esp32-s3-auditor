@@ -634,14 +634,14 @@ void lora_service_task(void *pv) {
                                                     g_app_context.lora.stats.updated = true;
                                                     xSemaphoreGive(g_app_context.lora.mutex);
                                                 }
-                                                snprintf(log_msg, sizeof(log_msg), "[%08lX] LocalStats updated\n", (unsigned long)packet.from);
+                                                snprintf(log_msg, 256, "[%08lX] LocalStats updated\n", (unsigned long)packet.from);
                                             }
                                         }
                                     } else if (data.portnum == meshtastic_PortNum_POSITION_APP) {
                                         meshtastic_Position pos = meshtastic_Position_init_zero;
                                         pb_istream_t pos_stream = pb_istream_from_buffer(data.payload.bytes, data.payload.size);
                                         if (pb_decode(&pos_stream, meshtastic_Position_fields, &pos)) {
-                                            snprintf(log_msg, sizeof(log_msg), "[%08lX] GPS: %.4f, %.4f\n", 
+                                            snprintf(log_msg, 256, "[%08lX] GPS: %.4f, %.4f\n", 
                                                 (unsigned long)packet.from, 
                                                 pos.latitude_i / 1e7, pos.longitude_i / 1e7);
                                             
@@ -656,7 +656,7 @@ void lora_service_task(void *pv) {
                                         }
                                     } else if (data.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP) {
                                         // Safely print up to payload.size using %.*s to prevent buffer overflows on max-length messages
-                                        snprintf(log_msg, sizeof(log_msg), "[%08lX] Msg: %.*s\n", (unsigned long)packet.from, (int)data.payload.size, data.payload.bytes);
+                                        snprintf(log_msg, 256, "[%08lX] Msg: %.*s\n", (unsigned long)packet.from, (int)data.payload.size, data.payload.bytes);
                                         
                                         // Try to map sender ID to known name for the chat interface
                                         char sender_name[40];
@@ -672,7 +672,6 @@ void lora_service_task(void *pv) {
                                             xSemaphoreGive(g_app_context.lora.mutex);
                                         }
                                     snprintf(chat_msg, 256, "[%s]: %.*s\n", sender_name, (int)data.payload.size, data.payload.bytes);
-                                    snprintf(chat_msg, 300, "%s [%s]: %.*s\n", time_str, sender_name, (int)data.payload.size, data.payload.bytes);
                                     } else if (data.portnum == meshtastic_PortNum_NODEINFO_APP) {
                                         meshtastic_User user = meshtastic_User_init_zero;
                                         pb_istream_t user_stream = pb_istream_from_buffer(data.payload.bytes, data.payload.size);
@@ -757,14 +756,14 @@ void lora_service_task(void *pv) {
                         
                         // If we successfully built a log message, push it to the UI
                         if (strlen(log_msg) > 0 && g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-                            safe_append(g_app_context.lora.log_data, sizeof(g_app_context.lora.log_data), log_msg);
+                            safe_append(g_app_context.lora.log_data, 2048, log_msg);
                             g_app_context.lora.log_updated = true;
                             xSemaphoreGive(g_app_context.lora.mutex);
                         }
 
                         // If we successfully built a chat message, push it to the Chat UI
                         if (strlen(chat_msg) > 0 && g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-                            safe_append(g_app_context.lora.chat_data, sizeof(g_app_context.lora.chat_data), chat_msg);
+                            safe_append(g_app_context.lora.chat_data, 2048, chat_msg);
                             g_app_context.lora.chat_updated = true;
                             g_app_context.lora.unread_chat = true; // Trigger notification
                             xSemaphoreGive(g_app_context.lora.mutex);
@@ -931,12 +930,42 @@ void cb_start_pmkid(lv_event_t*) {
         return;
     }
     if (g_app_context.audit.current_mode != AUDIT_NONE) stop_pentest(&g_app_context);
+
+    // Pause scan and stop promiscuous before swapping callbacks
+    g_app_context.wifi_scan.paused = true;
+    esp_wifi_set_promiscuous(false);
+    WiFi.scanDelete();
+
     g_app_context.audit.pmkid_found = false;
-    memcpy(g_app_context.audit.pmkid_target_bssid, g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].bssid, 6); // Corrected access
-    set_promiscuous_channel(g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].channel); // Corrected access
+    memset(g_app_context.audit.pmkid_value, 0, sizeof(g_app_context.audit.pmkid_value));
+    memset(g_app_context.audit.pmkid_sta_mac, 0, sizeof(g_app_context.audit.pmkid_sta_mac));
+    memset(g_app_context.audit.pmkid_target_ssid, 0, sizeof(g_app_context.audit.pmkid_target_ssid));
+    memset(g_app_context.audit.pmkid_target_bssid, 0, sizeof(g_app_context.audit.pmkid_target_bssid));
+
+    uint8_t target_bssid[6] = {0};
+    uint8_t target_channel = 1;
+    char target_ssid[33] = {0};
+
+    if (g_app_context.wifi_scan.mutex && xSemaphoreTake(g_app_context.wifi_scan.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (g_app_context.wifi_scan.selected_net >= 0 && g_app_context.wifi_scan.selected_net < g_app_context.wifi_scan.ap_count) {
+            APRecord& ap = g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net];
+            memcpy(target_bssid, ap.bssid, 6);
+            target_channel = ap.channel;
+            strncpy(target_ssid, ap.ssid, 32);
+            target_ssid[32] = '\0';
+        }
+        xSemaphoreGive(g_app_context.wifi_scan.mutex);
+    }
+
+    memcpy(g_app_context.audit.pmkid_target_bssid, target_bssid, 6);
+    strncpy(g_app_context.audit.pmkid_target_ssid, target_ssid, sizeof(g_app_context.audit.pmkid_target_ssid) - 1);
+    g_app_context.audit.pmkid_target_ssid[sizeof(g_app_context.audit.pmkid_target_ssid) - 1] = '\0';
+
+    set_promiscuous_channel(target_channel);
     esp_wifi_set_promiscuous_rx_cb(pmkid_sniffer_cb);
     g_app_context.audit.current_mode = AUDIT_PMKID;
     g_app_context.audit.audit_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
+    esp_wifi_set_promiscuous(true);
     lv_label_set_text(lbl_audit_status, "#00AAFF PMKID SNIFFING...#\nWaiting for handshake");
     lv_obj_add_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
@@ -1023,10 +1052,8 @@ void cb_send_lora(lv_event_t* e) {
 
             // Local echo to screen
             if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-                char local_msg[256];
-                snprintf(local_msg, sizeof(local_msg), "[ME]: %s\n", txt);
-                char local_msg[300]; // Increased size for timestamp
-                snprintf(local_msg, 300, "%s [ME]: %s\n", time_str, txt);
+                char local_msg[300];
+                snprintf(local_msg, sizeof(local_msg), "%s [ME]: %s\n", time_str, txt);
                 if (strlen(g_app_context.lora.log_data) + strlen(local_msg) >= 2048 - 10) {
                     strcpy(g_app_context.lora.log_data, "--- Buffer Cleared ---\n");
                 }
@@ -1054,10 +1081,8 @@ void cb_send_lora_chat(lv_event_t* e) {
             strftime(time_str, sizeof(time_str), "[%H:%M]", &timeinfo);
 
             if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-                char local_msg[256];
-                snprintf(local_msg, sizeof(local_msg), "[ME]: %s\n", txt);
-                char local_msg[300]; // Increased size for timestamp
-                snprintf(local_msg, 300, "%s [ME]: %s\n", time_str, txt);
+                char local_msg[300];
+                snprintf(local_msg, sizeof(local_msg), "%s [ME]: %s\n", time_str, txt);
                 if (strlen(g_app_context.lora.chat_data) + strlen(local_msg) >= 2048 - 10) {
                     strcpy(g_app_context.lora.chat_data, "--- Buffer Cleared ---\n");
                 }
@@ -1278,6 +1303,11 @@ void setup() {
     display_init();
     sd_logger_init();
 
+    // Bring up WiFi stack early so promiscuous operations are safe later.
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true);
+    esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+
     Serial.printf("[STARTUP] Internal RAM: Total=%u Free=%u MinFree=%u\n",
         ESP.getHeapSize(), ESP.getFreeHeap(), ESP.getMinFreeHeap());
     Serial.printf("[STARTUP] PSRAM: Total=%u Free=%u MinFree=%u\n",
@@ -1316,7 +1346,10 @@ void setup() {
     g_app_context.audit.audit_timer = nullptr;
     g_app_context.audit.beacon_idx = 0;
     g_app_context.audit.pmkid_found = false;
-    memset(g_app_context.audit.pmkid_target_bssid, 0, 6);
+    memset(g_app_context.audit.pmkid_target_ssid, 0, sizeof(g_app_context.audit.pmkid_target_ssid));
+    memset(g_app_context.audit.pmkid_value, 0, sizeof(g_app_context.audit.pmkid_value));
+    memset(g_app_context.audit.pmkid_sta_mac, 0, sizeof(g_app_context.audit.pmkid_sta_mac));
+    memset(g_app_context.audit.pmkid_target_bssid, 0, sizeof(g_app_context.audit.pmkid_target_bssid));
     g_app_context.sniffer.pcap_active = false;
     g_app_context.sniffer.probe_active = false;
     g_app_context.sniffer.pcap_queue = nullptr;

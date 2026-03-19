@@ -52,36 +52,54 @@ void run_ap_scan(AppContext *ctx) {
 
 // Helper to add/update STA records - Marked IRAM_ATTR for safe calling from promiscuous callback
 void IRAM_ATTR add_or_update_sta(AppContext* ctx, const uint8_t* mac, const uint8_t* ap_bssid, int8_t rssi, bool hasAP) {
-    if (!ctx || !ctx->wifi_scan.mutex) return;
+    if (!ctx || !ctx->wifi_scan.mutex || !ctx->wifi_scan.sta_list) return;
 
     // Use a non-blocking take for the mutex, as this is called from promiscuous callback
     // or a high-priority task. If it fails, we drop the packet for this cycle.
-    if (xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(0)) == pdTRUE) {
-        bool found = false;
+    if (xSemaphoreTake(ctx->wifi_scan.mutex, 0) == pdTRUE) {
+        const uint32_t now = millis();
+        int reuse_idx = -1;
+
         for (int i = 0; i < ctx->wifi_scan.sta_count; i++) {
-            if (memcmp(ctx->wifi_scan.sta_list[i].mac, mac, 6) == 0) {
-                // Update existing STA
-                ctx->wifi_scan.sta_list[i].rssi = rssi;
-                ctx->wifi_scan.sta_list[i].lastSeen = millis();
-                ctx->wifi_scan.sta_list[i].active = true;
-                if (hasAP) {
-                    memcpy(ctx->wifi_scan.sta_list[i].apBssid, ap_bssid, 6);
-                    ctx->wifi_scan.sta_list[i].hasAP = true;
+            StaRecord& sta = ctx->wifi_scan.sta_list[i];
+
+            if (memcmp(sta.mac, mac, 6) == 0) {
+                sta.rssi = rssi;
+                sta.lastSeen = now;
+                sta.active = true;
+                if (hasAP && ap_bssid) {
+                    memcpy(sta.apBssid, ap_bssid, 6);
+                    sta.hasAP = true;
                 }
-                found = true;
-                break;
+                xSemaphoreGive(ctx->wifi_scan.mutex);
+                return;
+            }
+
+            if (reuse_idx < 0 && !sta.active) {
+                reuse_idx = i;
             }
         }
 
-        if (!found && ctx->wifi_scan.sta_count < MAX_STAS) {
-            // Add new STA
-            StaRecord& new_sta = ctx->wifi_scan.sta_list[ctx->wifi_scan.sta_count];
+        int insert_idx = -1;
+        if (reuse_idx >= 0) {
+            insert_idx = reuse_idx;
+        } else if (ctx->wifi_scan.sta_count < MAX_STAS) {
+            insert_idx = ctx->wifi_scan.sta_count++;
+        }
+
+        if (insert_idx >= 0) {
+            StaRecord& new_sta = ctx->wifi_scan.sta_list[insert_idx];
             memcpy(new_sta.mac, mac, 6);
             new_sta.rssi = rssi;
-            new_sta.lastSeen = millis();
+            new_sta.lastSeen = now;
             new_sta.active = true;
-            if (hasAP) { memcpy(new_sta.apBssid, ap_bssid, 6); new_sta.hasAP = true; } else { memset(new_sta.apBssid, 0, 6); new_sta.hasAP = false; }
-            ctx->wifi_scan.sta_count++;
+            if (hasAP && ap_bssid) {
+                memcpy(new_sta.apBssid, ap_bssid, 6);
+                new_sta.hasAP = true;
+            } else {
+                memset(new_sta.apBssid, 0, sizeof(new_sta.apBssid));
+                new_sta.hasAP = false;
+            }
         }
         xSemaphoreGive(ctx->wifi_scan.mutex);
     }
