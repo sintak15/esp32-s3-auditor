@@ -22,3 +22,6 @@ void scan_tick(lv_timer_t *timer);
 #ifdef __cplusplus
 }
 #endif
+
+// C++ specific declarations
+void IRAM_ATTR add_or_update_sta(AppContext* ctx, const uint8_t* mac, const uint8_t* ap_bssid, int8_t rssi, bool hasAP);

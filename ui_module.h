@@ -17,9 +17,9 @@ extern lv_obj_t *lbl_pcap_status;
 extern lv_obj_t *lbl_pcap_ch;
 extern lv_obj_t *btn_pcap_lock;
 extern lv_obj_t *low_batt_border;
+extern lv_obj_t *temp_warning_border; // Added for temperature alerts
 extern lv_chart_series_t *ui_heap_series;
 extern lv_obj_t *btn_ble_sniff;
-extern lv_obj_t *temp_warning_border;
 extern lv_obj_t *about_panel;
 extern lv_obj_t *lbl_firmware_version;
 extern lv_obj_t *lbl_build_date;
@@ -30,6 +30,10 @@ extern lv_obj_t *lbl_ota_progress;
 extern lv_obj_t *btn_ble_flood;
 extern lv_obj_t *btn_pcap_start;
 extern lv_obj_t *btn_probe_start;
+extern lv_obj_t *lbl_reset_cal_button; // Make the label for the reset button globally accessible
+
+// New externs for the confirmation dialog
+extern lv_obj_t *confirm_reset_panel;
 
 extern lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
                   style_btn_blue, style_view_active, style_view_inactive;

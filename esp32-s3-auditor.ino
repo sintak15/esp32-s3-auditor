@@ -9,15 +9,15 @@
 #include <esp_task_wdt.h>
 #include <lvgl.h>
 #include <WiFi.h>
-#include <mbedtls/sha256.h> // For SHA256 hash calculation
 #include <esp_wifi.h>
 #include <WebServer.h>
-#include <HTTPClient.h> // For OTA
-#include <Update.h>     // For OTA
 #include <SD_MMC.h>
+#include <Update.h>
 #include <nvs_flash.h> // For NVS initialization
 #include <esp_heap_caps.h> // For heap diagnostics
 #include <freertos/semphr.h>
+#include <mbedtls/sha256.h>
+#include <driver/temperature_sensor.h>
 #include <sys/time.h> // For settimeofday()
 
 #include <pb_encode.h>
@@ -65,9 +65,6 @@ extern lv_obj_t *btn_stop_audit;
 extern lv_obj_t *lbl_firmware_version;
 extern lv_obj_t *lbl_build_date;
 extern lv_obj_t *lbl_device_id;
-extern lv_obj_t *lbl_current_sha256;
-extern lv_obj_t *lbl_ota_status;
-extern lv_obj_t *lbl_ota_progress;
 extern lv_obj_t *tabview;
 
 // ──────────────────────────────────────────────
@@ -374,12 +371,13 @@ void process_ui_queue() {
 //             Benign Service Tasks
 // ──────────────────────────────────────────────
 
-static void write_status_snapshot(bool sdMounted, int batteryPct, bool isCharging, uint32_t batteryMv) {
+static void write_status_snapshot(bool sdMounted, int batteryPct, bool isCharging, uint32_t batteryMv, int batteryTempC) {
     if (g_app_context.status.mutex && xSemaphoreTake(g_app_context.status.mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
         g_app_context.status.snap.sdMounted = sdMounted;
         g_app_context.status.snap.batteryPct = batteryPct;
         g_app_context.status.snap.isCharging = isCharging;
         g_app_context.status.snap.batteryMv = batteryMv;
+        g_app_context.status.snap.batteryTempC = batteryTempC;
         xSemaphoreGive(g_app_context.status.mutex);
     }
 }
@@ -392,171 +390,6 @@ void reset_battery_calibration() {
         nvs_close(nvs);
     }
     g_app_context.status.calibrated_max_mv = 4050; // Reset to safe default
-}
-
-static String get_sha256_from_url(const char* url) {
-    HTTPClient http;
-    http.begin(url);
-    int httpCode = http.GET();
-    if (httpCode == HTTP_CODE_OK) {
-        String hash = http.getString();
-        hash.trim();
-        return hash;
-    }
-    return "";
-}
-
-void ota_task(void *pvParameters) {
-    g_app_context.ota_active = true;
-    strlcpy(g_app_context.ota_status_message, "Connecting to WiFi...", sizeof(g_app_context.ota_status_message));
-    g_app_context.ota_progress_pct = 0;
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(OTA_WIFI_SSID, OTA_WIFI_PASS);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-        vTaskDelay(pdMS_TO_TICKS(500));
-        attempts++;
-        g_app_context.ota_progress_pct = attempts * 5; // 5% per attempt
-        snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Connecting... %d%%", g_app_context.ota_progress_pct);
-    }
-
-    if (WiFi.status() != WL_CONNECTED) {
-        strlcpy(g_app_context.ota_status_message, "WiFi failed!", sizeof(g_app_context.ota_status_message));
-        g_app_context.ota_active = false;
-        vTaskDelete(NULL);
-        return;
-    }
-
-    strlcpy(g_app_context.ota_status_message, "WiFi connected. Checking version...", sizeof(g_app_context.ota_status_message));
-    g_app_context.ota_progress_pct = 10;
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    HTTPClient http;
-    http.begin(FIRMWARE_VERSION_URL);
-    int httpCode = http.GET();
-    http.end(); // Close connection for version check
-
-    if (httpCode == HTTP_CODE_OK) {
-        String newVersionStr = http.getString();
-        newVersionStr.trim();
-
-        String expectedSha256 = get_sha256_from_url(FIRMWARE_SHA256_URL);
-        if (expectedSha256.isEmpty()) {
-            strlcpy(g_app_context.ota_status_message, "Failed to get expected SHA256!", sizeof(g_app_context.ota_status_message));
-            g_app_context.ota_active = false;
-            vTaskDelete(NULL);
-            return;
-        }
-
-        Serial.printf("[OTA] Latest version: %s, Current: %s\n", newVersionStr.c_str(), FIRMWARE_VERSION);
-
-        if (newVersionStr.equals(FIRMWARE_VERSION)) {
-            strlcpy(g_app_context.ota_status_message, "Already up to date!", sizeof(g_app_context.ota_status_message));
-            g_app_context.ota_active = false;
-            http.end();
-            vTaskDelete(NULL);
-            return;
-        }
-
-        strlcpy(g_app_context.ota_status_message, "New version found! Downloading...", sizeof(g_app_context.ota_status_message));
-        g_app_context.ota_progress_pct = 20;
-        vTaskDelay(pdMS_TO_TICKS(1000));
-
-        char firmwareUrl[256];
-        snprintf(firmwareUrl, sizeof(firmwareUrl), FIRMWARE_BINARY_URL, newVersionStr.c_str());
-        http.begin(firmwareUrl);
-        httpCode = http.GET();
-
-        if (httpCode == HTTP_CODE_OK) {
-            int contentLength = http.getSize();
-            bool canBegin = Update.begin(contentLength);
-            
-            if (canBegin) {
-                WiFiClient& client = http.getStream();
-
-                mbedtls_sha256_context sha256_ctx;
-                mbedtls_sha256_init(&sha256_ctx);
-                mbedtls_sha256_starts_ret(&sha256_ctx, 0); // 0 for SHA256
-
-                uint8_t buf[1024]; // Buffer for reading chunks
-                size_t total_read = 0;
-                int current_progress = 0;
-
-                while (client.connected() && (contentLength > 0 || contentLength == -1)) {
-                    size_t len = client.readBytes(buf, std::min((size_t)contentLength, sizeof(buf)));
-                    if (len == 0) break; // No more data
-
-                    mbedtls_sha256_update_ret(&sha256_ctx, buf, len);
-                    Update.write(buf, len);
-                    total_read += len;
-
-                    if (contentLength != -1) contentLength -= len;
-                    
-                    int new_progress = (total_read * 100) / http.getSize();
-                    if (new_progress > current_progress) {
-                        current_progress = new_progress;
-                        g_app_context.ota_progress_pct = new_progress;
-                        snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Downloading... %d%%", new_progress);
-                    }
-                }
-
-                unsigned char calculated_hash[32];
-                mbedtls_sha256_finish_ret(&sha256_ctx, calculated_hash);
-                mbedtls_sha256_free(&sha256_ctx);
-
-                char calculated_hash_str[65];
-                for (int i = 0; i < 32; i++) {
-                    sprintf(&calculated_hash_str[i * 2], "%02x", calculated_hash[i]);
-                }
-                calculated_hash_str[64] = '\0';
-
-                if (String(calculated_hash_str).equalsIgnoreCase(expectedSha256)) {
-                    strlcpy(g_app_context.ota_status_message, "Download complete. Verifying & Updating...", sizeof(g_app_context.ota_status_message));
-                    g_app_context.ota_progress_pct = 95;
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-
-                    if (Update.end()) {
-                        if (Update.is  Committed()) {
-                            strlcpy(g_app_context.ota_status_message, "Update successful! Rebooting...", sizeof(g_app_context.ota_status_message));
-                            g_app_context.ota_progress_pct = 100;
-                            vTaskDelay(pdMS_TO_TICKS(2000));
-                            ESP.restart();
-                        } else {
-                            strlcpy(g_app_context.ota_status_message, "Update not committed!", sizeof(g_app_context.ota_status_message));
-                            Update.abort();
-                        }
-                    } else {
-                        snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Update failed! Error: %d", Update.getError());
-                        Update.abort();
-                    }
-                } else {
-                    strlcpy(g_app_context.ota_status_message, "Hash mismatch! Aborting.", sizeof(g_app_context.ota_status_message));
-                    Update.abort();
-                }
-            } else {
-                strlcpy(g_app_context.ota_status_message, "Not enough space for OTA!", sizeof(g_app_context.ota_status_message));
-            }
-        } else {
-            snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Firmware download failed! Code: %d", httpCode);
-        }
-    } else {
-        snprintf(g_app_context.ota_status_message, sizeof(g_app_context.ota_status_message), "Version check failed! Code: %d", httpCode);
-    }
-
-    http.end();
-    WiFi.disconnect(true);
-    g_app_context.ota_active = false;
-    vTaskDelete(NULL);
-}
-
-void start_ota_task() {
-    if (g_app_context.ota_active) {
-        Serial.println("[OTA] Update already in progress.");
-        return;
-    }
-    xTaskCreatePinnedToCore(ota_task, "ota_task", 8192, NULL, 5, NULL, 0); // Run on Core 0, higher priority
 }
 
 void load_battery_calibration() {
@@ -577,6 +410,13 @@ void status_service_task(void *pv) {
     // Configure ADC attenuation for the full 0-3.1V range
     // On S3-CYD models, the battery pin is GPIO 1 (GPIO 4 is LCD_DC)
     analogSetAttenuation(ADC_11db);
+
+    // Initialize internal temperature sensor
+    temperature_sensor_handle_t temp_handle = NULL;
+    temperature_sensor_config_t temp_conf = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+    if (temperature_sensor_install(&temp_conf, &temp_handle) == ESP_OK) {
+        temperature_sensor_enable(temp_handle);
+    }
     
     load_battery_calibration();
 
@@ -631,7 +471,11 @@ void status_service_task(void *pv) {
                 sd_reinit();
             }
         }
-        write_status_snapshot(sd_card_ready(), newBattPct, charging, mv);
+
+        float tsens_out = 0;
+        if (temp_handle) temperature_sensor_get_celsius(temp_handle, &tsens_out);
+
+        write_status_snapshot(sd_card_ready(), newBattPct, charging, mv, (int)tsens_out);
         vTaskDelay(pdMS_TO_TICKS(500)); // Sample twice as fast for better responsiveness
     }
 }
@@ -828,6 +672,7 @@ void lora_service_task(void *pv) {
                                             xSemaphoreGive(g_app_context.lora.mutex);
                                         }
                                     snprintf(chat_msg, 256, "[%s]: %.*s\n", sender_name, (int)data.payload.size, data.payload.bytes);
+                                    snprintf(chat_msg, 300, "%s [%s]: %.*s\n", time_str, sender_name, (int)data.payload.size, data.payload.bytes);
                                     } else if (data.portnum == meshtastic_PortNum_NODEINFO_APP) {
                                         meshtastic_User user = meshtastic_User_init_zero;
                                         pb_istream_t user_stream = pb_istream_from_buffer(data.payload.bytes, data.payload.size);
@@ -1170,10 +1015,18 @@ void cb_send_lora(lv_event_t* e) {
         if (txt && strlen(txt) > 0) {
             send_meshtastic_text(txt);
 
+            time_t now_epoch_time = time(NULL);
+            struct tm timeinfo;
+            char time_str[10];
+            localtime_r(&now_epoch_time, &timeinfo);
+            strftime(time_str, sizeof(time_str), "[%H:%M]", &timeinfo);
+
             // Local echo to screen
             if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
                 char local_msg[256];
                 snprintf(local_msg, sizeof(local_msg), "[ME]: %s\n", txt);
+                char local_msg[300]; // Increased size for timestamp
+                snprintf(local_msg, 300, "%s [ME]: %s\n", time_str, txt);
                 if (strlen(g_app_context.lora.log_data) + strlen(local_msg) >= 2048 - 10) {
                     strcpy(g_app_context.lora.log_data, "--- Buffer Cleared ---\n");
                 }
@@ -1193,9 +1046,18 @@ void cb_send_lora_chat(lv_event_t* e) {
         const char* txt = lv_textarea_get_text(ta_lora_chat_input);
         if (txt && strlen(txt) > 0) {
             send_meshtastic_text(txt);
+
+            time_t now_epoch_time = time(NULL);
+            struct tm timeinfo;
+            char time_str[10];
+            localtime_r(&now_epoch_time, &timeinfo);
+            strftime(time_str, sizeof(time_str), "[%H:%M]", &timeinfo);
+
             if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
                 char local_msg[256];
                 snprintf(local_msg, sizeof(local_msg), "[ME]: %s\n", txt);
+                char local_msg[300]; // Increased size for timestamp
+                snprintf(local_msg, 300, "%s [ME]: %s\n", time_str, txt);
                 if (strlen(g_app_context.lora.chat_data) + strlen(local_msg) >= 2048 - 10) {
                     strcpy(g_app_context.lora.chat_data, "--- Buffer Cleared ---\n");
                 }
@@ -1395,20 +1257,6 @@ void wifi_worker_task(void *pvParameters) {
     }
 }
 
-static void calculate_current_firmware_sha256() {
-    mbedtls_sha256_context sha256_ctx;
-    mbedtls_sha256_init(&sha256_ctx);
-    mbedtls_sha256_starts_ret(&sha256_ctx, 0);
-
-    const esp_app_desc_t *app_desc = esp_ota_get_app_description();
-    mbedtls_sha256_update_ret(&sha256_ctx, (const unsigned char*)app_desc->app_elf_sha256, sizeof(app_desc->app_elf_sha256));
-
-    unsigned char hash[32];
-    mbedtls_sha256_finish_ret(&sha256_ctx, hash);
-    for (int i = 0; i < 32; i++) sprintf(&g_app_context.current_firmware_sha256[i * 2], "%02x", hash[i]);
-    g_app_context.current_firmware_sha256[64] = '\0';
-}
-
 void setup() {
     Serial.begin(115200);
     SerialLoRa.setRxBufferSize(4096); // INCREASE RX BUFFER to prevent interrupt storms during NodeDB bursts
@@ -1502,7 +1350,7 @@ void setup() {
     g_app_context.device_id = WiFi.macAddress(); // Store device MAC address
     g_app_context.ui_busy = false;
     
-    write_status_snapshot(sd_card_ready(), 100, false, 4200); // Corrected argument count
+    write_status_snapshot(sd_card_ready(), 100, false, 4200, 25); 
 
     // Initialize modules
     wifi_scanner_init(&g_app_context);
@@ -1535,9 +1383,7 @@ void setup() {
     // Wake up the connected LoRa node
     wake_meshtastic_node();
 
-    calculate_current_firmware_sha256();
-
-    Serial.println("ESP32-S3 Auditor ready (Build: Arduino IDE).");
+    Serial.println("ESP32-S3 Auditor ready (Refactored).");
     
     static uint8_t* local_ui_queue_storage = (uint8_t*)ps_malloc(15 * sizeof(LocalUiEvent));
     static StaticQueue_t* local_ui_queue_buffer = (StaticQueue_t*)ps_malloc(sizeof(StaticQueue_t));

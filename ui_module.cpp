@@ -8,6 +8,7 @@
 
 // Global AppContext instance (defined in main .ino file)
 extern AppContext g_app_context;
+extern void reset_battery_calibration();
 
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
@@ -37,6 +38,7 @@ lv_obj_t *lora_chat_panel = nullptr;
 lv_obj_t *ta_lora_chat = nullptr;
 lv_obj_t *ta_lora_chat_input = nullptr;
 lv_obj_t *lora_log_panel = nullptr;
+lv_obj_t *temp_warning_border = nullptr;
 lv_obj_t *ui_spinner = nullptr;
 lv_obj_t *lbl_gps_data = nullptr;
 lv_obj_t *lbl_pcap_status = nullptr; // Corrected to be a single declaration
@@ -45,6 +47,10 @@ lv_obj_t *battery_stats_panel = nullptr;
 lv_obj_t *lbl_battery_stats = nullptr;
 lv_obj_t *ui_battery_chart = nullptr;
 lv_chart_series_t *ui_battery_series = nullptr;
+lv_obj_t *lbl_reset_cal_button = nullptr; // Globally define the label for the reset button
+
+// Confirmation dialog elements
+lv_obj_t *confirm_reset_panel = nullptr;
 lv_chart_series_t *ui_heap_series = nullptr;
 
 lv_obj_t *beacon_ssid_panel = nullptr;
@@ -52,13 +58,6 @@ lv_obj_t *diagnostics_panel = nullptr;
 lv_obj_t *ta_diagnostics = nullptr;
 lv_obj_t *sys_stats_panel = nullptr;
 lv_obj_t *ta_sys_stats = nullptr;
-lv_obj_t *about_panel = nullptr;
-lv_obj_t *lbl_firmware_version = nullptr;
-lv_obj_t *lbl_build_date = nullptr;
-lv_obj_t *lbl_device_id = nullptr;
-lv_obj_t *lbl_current_sha256 = nullptr;
-lv_obj_t *lbl_ota_status = nullptr;
-lv_obj_t *lbl_ota_progress = nullptr;
 
 extern void toggle_web_server();
 extern void spoof_mac();
@@ -121,17 +120,17 @@ void ui_build() {
   no_scroll(status_bar);
 
   lv_obj_t *title=lv_label_create(status_bar);
-  lv_label_set_text(title, LV_SYMBOL_SETTINGS " AUDITOR");
+  lv_label_set_text(title, LV_SYMBOL_SETTINGS); // Removed "AUDITOR" to save space
   lv_obj_set_style_text_color(title, lv_color_hex(UI::Colors::Primary), 0);
   lv_obj_align(title, LV_ALIGN_LEFT_MID, 2, 0);
 
   ui_spinner = lv_spinner_create(status_bar, 1000, 60);
   lv_obj_set_size(ui_spinner, 16, 16);
-  lv_obj_align(ui_spinner, LV_ALIGN_LEFT_MID, 95, 0);
+  lv_obj_align(ui_spinner, LV_ALIGN_LEFT_MID, 22, 0);
   lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); // Hidden by default
 
   lv_obj_t *icont=lv_obj_create(status_bar);
-  lv_obj_set_size(icont, 140, 24); lv_obj_align(icont, LV_ALIGN_RIGHT_MID, 0, 0);
+  lv_obj_set_size(icont, 200, 24); lv_obj_align(icont, LV_ALIGN_RIGHT_MID, 0, 0);
   lv_obj_set_style_bg_opa(icont, 0, 0); lv_obj_set_style_border_width(icont, 0, 0);
   lv_obj_set_flex_flow(icont, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(icont, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -180,11 +179,10 @@ void ui_build() {
   beacon_ssid_panel = lv_tabview_add_tab(tabview, "SSIDs"); // Index 9
   diagnostics_panel = lv_tabview_add_tab(tabview, "Diag");  // Index 10
   sys_stats_panel   = lv_tabview_add_tab(tabview, "Perf");  // Index 11
-  battery_stats_panel = lv_tabview_add_tab(tabview, "Batt"); // Index 12
-  about_panel       = lv_tabview_add_tab(tabview, "About"); // Index 13
+  battery_stats_panel = lv_tabview_add_tab(tabview, "Batt");// Index 12
   
-  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps, // Main tabs
-                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, about_panel, tv_cont}; // Sub-tabs
+  lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,
+                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, tv_cont};
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
@@ -219,6 +217,7 @@ void ui_build() {
   // ── Shared return-home button builder ─────────
   auto add_return_btn=[](lv_obj_t *parent) {
     lv_obj_t *btn=lv_btn_create(parent); 
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_set_size(btn, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); // Standardized size
     lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); lv_obj_add_style(btn, &style_btn_dark, 0); // Standardized position
     lv_obj_add_event_cb(btn, cb_nav_home, LV_EVENT_CLICKED, nullptr);
@@ -229,6 +228,7 @@ void ui_build() {
   // Drill-down return to Settings helper
   auto add_settings_back_btn=[](lv_obj_t *parent) {
     lv_obj_t *btn=lv_btn_create(parent); 
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_set_size(btn, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
     lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); lv_obj_add_style(btn, &style_btn_dark, 0);
     lv_obj_add_event_cb(btn, [](lv_event_t*){ navigate_to(6); }, LV_EVENT_CLICKED, nullptr);
@@ -463,10 +463,6 @@ void ui_build() {
   lv_obj_clear_flag(btn_open_batt_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_batt_stats,0), lv_color_hex(UI::Colors::Success), 0);
 
   // Brightness Slider
-  lv_obj_t *lbl_br = lv_label_create(tab_settings);
-  lv_label_set_text(lbl_br, LV_SYMBOL_SETTINGS " SCREEN BRIGHTNESS");
-  lv_obj_align(lbl_br, LV_ALIGN_TOP_MID, 0, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 4);
-
   lv_obj_t *slider_bright = lv_slider_create(tab_settings);
   lv_obj_set_size(slider_bright, SCREEN_W - 60, 12);
   lv_obj_align(slider_bright, LV_ALIGN_TOP_MID, 0, 220);
@@ -476,12 +472,9 @@ void ui_build() {
       int v = lv_slider_get_value(lv_event_get_target(e));
       ledcWrite(TFT_BL, v); // Write directly to the pin in Core 3.x
   }, LV_EVENT_VALUE_CHANGED, nullptr);
-
-  lv_obj_t *btn_open_about = make_atk_btn(tab_settings, LV_SYMBOL_DIRECTORY " ABOUT", &style_btn_dark, 0xAAAAAA, [](lv_event_t *e) {
-      navigate_to(13);
-  }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 5);
-  lv_obj_clear_flag(btn_open_about, LV_OBJ_FLAG_HIDDEN);
-
+  lv_obj_t *lbl_br = lv_label_create(tab_settings);
+  lv_label_set_text(lbl_br, LV_SYMBOL_SETTINGS " SCREEN BRIGHTNESS");
+  lv_obj_align_to(lbl_br, slider_bright, LV_ALIGN_OUT_TOP_MID, 0, -5);
 
   add_return_btn(tab_settings);
 
@@ -605,9 +598,7 @@ void ui_build() {
 
   // Voltage History Chart
   ui_battery_chart = lv_chart_create(battery_stats_panel);
-  lv_obj_set_size(ui_battery_chart, SCREEN_W - 30, 100);
-  lv_obj_align(ui_battery_chart, LV_ALIGN_TOP_MID, 0, 140);
-  lv_chart_set_type(ui_battery_chart, LV_CHART_TYPE_LINE);
+  lv_obj_set_size(ui_battery_chart, SCREEN_W - 30, 85);
   lv_chart_set_update_mode(ui_battery_chart, LV_CHART_UPDATE_MODE_SHIFT);
   lv_chart_set_point_count(ui_battery_chart, 30); // Show last 2.5 minutes (30 * 5s)
   lv_chart_set_range(ui_battery_chart, LV_CHART_AXIS_PRIMARY_Y, 3200, 4300);
@@ -620,66 +611,67 @@ void ui_build() {
   ui_battery_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00FF88), LV_CHART_AXIS_PRIMARY_Y);
   ui_heap_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00AAFF), LV_CHART_AXIS_SECONDARY_Y);
 
+  lv_obj_t *btn_reset_cal = lv_btn_create(battery_stats_panel);
+  lv_obj_set_size(btn_reset_cal, SCREEN_W - (UI::Layout::Margin * 2), 30);
+  lv_obj_align(btn_reset_cal, LV_ALIGN_BOTTOM_MID, 0, -50);
+  lv_obj_add_style(btn_reset_cal, &style_btn_dark, 0);
+  // When the reset button is clicked, show the confirmation dialog
+  lv_obj_add_event_cb(btn_reset_cal, [](lv_event_t *e) {
+      if (confirm_reset_panel) {
+          lv_obj_clear_flag(confirm_reset_panel, LV_OBJ_FLAG_HIDDEN);
+      }
+  }, LV_EVENT_CLICKED, nullptr);
+  lbl_reset_cal_button = lv_label_create(btn_reset_cal); lv_label_set_text(lbl_reset_cal_button, "RESET CALIBRATION"); lv_obj_center(lbl_reset_cal_button);
+
   add_settings_back_btn(battery_stats_panel);
 
-  // --- About Sub-Tab ---
-  lv_obj_set_style_bg_color(about_panel, lv_color_hex(UI::Colors::Background), 0);
-  lv_obj_set_style_border_color(about_panel, lv_color_hex(UI::Colors::Secondary), 0);
-  lv_obj_set_style_border_width(about_panel, 2, 0);
+  // ── Confirmation Dialog for Reset Calibration ──
+  confirm_reset_panel = lv_obj_create(battery_stats_panel);
+  lv_obj_set_size(confirm_reset_panel, SCREEN_W - 40, 120); // Smaller panel
+  lv_obj_center(confirm_reset_panel);
+  lv_obj_set_style_bg_color(confirm_reset_panel, lv_color_hex(0x300000), 0); // Dark red background for emphasis
+  lv_obj_set_style_bg_opa(confirm_reset_panel, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(confirm_reset_panel, lv_color_hex(UI::Colors::Warning), 0);
+  lv_obj_set_style_border_width(confirm_reset_panel, 2, 0);
+  lv_obj_set_style_radius(confirm_reset_panel, UI::Layout::CornerRadius, 0);
+  lv_obj_set_style_pad_all(confirm_reset_panel, UI::Layout::Padding, 0);
+  lv_obj_add_flag(confirm_reset_panel, LV_OBJ_FLAG_HIDDEN); // Hidden by default
+  no_scroll(confirm_reset_panel);
 
-  lv_obj_t *lbl_about_title = lv_label_create(about_panel);
-  lv_label_set_text(lbl_about_title, "#AAAAAA " LV_SYMBOL_DIRECTORY " ABOUT AUDITOR#");
-  lv_label_set_recolor(lbl_about_title, true);
-  lv_obj_align(lbl_about_title, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_t *lbl_confirm_msg = lv_label_create(confirm_reset_panel);
+  lv_label_set_text(lbl_confirm_msg, "#FF4444 Are you sure?#\n#AAAAAA This cannot be undone.#");
+  lv_label_set_recolor(lbl_confirm_msg, true);
+  lv_obj_align(lbl_confirm_msg, LV_ALIGN_TOP_MID, 0, 5);
 
-  lbl_firmware_version = lv_label_create(about_panel);
-  lv_label_set_text(lbl_firmware_version, "Firmware: vX.X.X");
-  lv_obj_align(lbl_firmware_version, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 40);
+  // Yes button
+  int btn_width = (SCREEN_W - 40 - UI::Layout::Padding * 3) / 2;
+  lv_obj_t *btn_confirm_yes = lv_btn_create(confirm_reset_panel);
+  lv_obj_set_size(btn_confirm_yes, btn_width, UI::Layout::ButtonHeight);
+  lv_obj_align(btn_confirm_yes, LV_ALIGN_BOTTOM_LEFT, UI::Layout::Padding, -UI::Layout::Padding);
+  lv_obj_add_style(btn_confirm_yes, &style_btn_red, 0);
+  lv_obj_add_event_cb(btn_confirm_yes, [](lv_event_t *e) {
+      reset_battery_calibration();
+      lv_label_set_text(lbl_reset_cal_button, LV_SYMBOL_REFRESH " CALIBRATION CLEARED");
+      
+      // Revert text after 3 seconds
+      lv_timer_t * t = lv_timer_create([](lv_timer_t * timer) {
+          lv_label_set_text((lv_obj_t*)timer->user_data, "RESET CALIBRATION");
+          lv_timer_del(timer);
+      }, 3000, lbl_reset_cal_button);
 
-  lbl_build_date = lv_label_create(about_panel);
-  lv_label_set_text(lbl_build_date, "Build Date: YYYY-MM-DD");
-  lv_obj_align(lbl_build_date, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 60);
-
-  lbl_device_id = lv_label_create(about_panel);
-  lv_label_set_text(lbl_device_id, "Platform: Arduino IDE");
-  lv_obj_align(lbl_device_id, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 80);
-
-  lbl_current_sha256 = lv_label_create(about_panel);
-  lv_label_set_text(lbl_current_sha256, "SHA256: Calculating...");
-  lv_obj_align(lbl_current_sha256, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 100);
-
-  lv_obj_t *btn_update_firmware = lv_btn_create(about_panel);
-  lv_obj_set_size(btn_update_firmware, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(btn_update_firmware, LV_ALIGN_TOP_MID, 0, 120);
-  lv_obj_add_style(btn_update_firmware, &style_btn_blue, 0);
-  lv_obj_add_event_cb(btn_update_firmware, [](lv_event_t *e) {
-      extern void start_ota_task();
-      start_ota_task();
+      lv_obj_add_flag(confirm_reset_panel, LV_OBJ_FLAG_HIDDEN);
   }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_update_firmware = lv_label_create(btn_update_firmware); lv_label_set_text(lbl_update_firmware, LV_SYMBOL_DOWNLOAD " UPDATE FIRMWARE"); lv_obj_center(lbl_update_firmware);
+  lv_obj_t *lbl_yes = lv_label_create(btn_confirm_yes); lv_label_set_text(lbl_yes, LV_SYMBOL_OK " YES"); lv_obj_center(lbl_yes);
 
-  lbl_ota_status = lv_label_create(about_panel);
-  lv_label_set_text(lbl_ota_status, "");
-  lv_obj_align(lbl_ota_status, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 160);
-  lbl_ota_progress = lv_label_create(about_panel);
-  lv_label_set_text(lbl_ota_progress, "");
-  lv_obj_align(lbl_ota_progress, LV_ALIGN_TOP_LEFT, UI::Layout::Padding, 180);
-
-  lv_obj_t *btn_reset_cal = lv_btn_create(about_panel);
-  lv_obj_set_size(btn_reset_cal, SCREEN_W - (UI::Layout::Margin * 2), 30);
-  lv_obj_align(btn_reset_cal, LV_ALIGN_BOTTOM_MID, 0, -45);
-  lv_obj_add_style(btn_reset_cal, &style_btn_dark, 0);
-  
-  lv_obj_add_event_cb(btn_reset_cal, [](lv_event_t *e) {
-      if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
-          extern void reset_battery_calibration();
-          reset_battery_calibration();
-          lv_label_set_text(lv_obj_get_child(e->target, 0), LV_SYMBOL_REFRESH " CALIBRATION CLEARED");
-      }
-  }, LV_EVENT_ALL, nullptr);
-  lv_obj_t *lbl_reset = lv_label_create(btn_reset_cal); lv_label_set_text(lbl_reset, "HOLD TO RESET CALIB"); lv_obj_center(lbl_reset);
-
-  add_settings_back_btn(about_panel);
+  // No button
+  lv_obj_t *btn_confirm_no = lv_btn_create(confirm_reset_panel);
+  lv_obj_set_size(btn_confirm_no, btn_width, UI::Layout::ButtonHeight);
+  lv_obj_align(btn_confirm_no, LV_ALIGN_BOTTOM_RIGHT, -UI::Layout::Padding, -UI::Layout::Padding);
+  lv_obj_add_style(btn_confirm_no, &style_btn_dark, 0);
+  lv_obj_add_event_cb(btn_confirm_no, [](lv_event_t *e) {
+      lv_obj_add_flag(confirm_reset_panel, LV_OBJ_FLAG_HIDDEN);
+  }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lbl_no = lv_label_create(btn_confirm_no); lv_label_set_text(lbl_no, LV_SYMBOL_CLOSE " NO"); lv_obj_center(lbl_no);
 
   // --- LoRa Stats Modal Panel ---
   lora_stats_panel = lv_obj_create(main_screen);
@@ -703,10 +695,6 @@ void ui_build() {
   
   lv_obj_t *btn_close_stats = lv_btn_create(lora_stats_panel);
   lv_obj_set_size(btn_close_stats, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); // Standardized size
-  lv_obj_align(btn_close_stats, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); // Standardized position
-  lv_obj_set_size(btn_close_stats, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(btn_close_stats, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
-  lv_obj_add_style(btn_close_stats, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_stats, [](lv_event_t *e) {
       if (lora_stats_panel) lv_obj_add_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN);
   }, LV_EVENT_CLICKED, nullptr);
@@ -737,10 +725,6 @@ void ui_build() {
   
   lv_obj_t *btn_close_nodedb = lv_btn_create(lora_nodedb_panel);
   lv_obj_set_size(btn_close_nodedb, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); // Standardized size
-  lv_obj_align(btn_close_nodedb, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding); // Standardized position
-  lv_obj_set_size(btn_close_nodedb, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(btn_close_nodedb, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
-  lv_obj_add_style(btn_close_nodedb, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_nodedb, [](lv_event_t *e) {
       lv_obj_add_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN);
   }, LV_EVENT_CLICKED, nullptr);
@@ -791,7 +775,7 @@ void ui_build() {
   lv_obj_t *btn_lora_clear = lv_btn_create(lora_log_panel); // Corrected to be a single declaration
   lv_obj_set_size(btn_lora_clear, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
   lv_obj_align(btn_lora_clear, LV_ALIGN_BOTTOM_RIGHT, -UI::Layout::Margin, -UI::Layout::Padding);
-  lv_obj_add_style(btn_lora_clear, &style_btn_dark, 0);
+  lv_obj_add_style(btn_lora_clear, &style_btn_red, 0);
   lv_obj_add_event_cb(btn_lora_clear, [](lv_event_t *e) {
       if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
           g_app_context.lora.log_data[0] = '\0'; // Wipe the buffer cleanly
@@ -799,7 +783,7 @@ void ui_build() {
           xSemaphoreGive(g_app_context.lora.mutex);
       }
   }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_lora_clear = lv_label_create(btn_lora_clear); lv_label_set_text(lbl_lora_clear, "CLEAR"); lv_obj_center(lbl_lora_clear);
+  lv_obj_t *lbl_lora_clear = lv_label_create(btn_lora_clear); lv_label_set_text(lbl_lora_clear, LV_SYMBOL_TRASH " CLEAR"); lv_obj_center(lbl_lora_clear);
 
   // --- LoRa Chat Modal Panel ---
   lora_chat_panel = lv_obj_create(main_screen);
@@ -833,13 +817,17 @@ void ui_build() {
   lv_obj_align(btn_lora_chat_send, LV_ALIGN_TOP_RIGHT, -5, 140);
   lv_obj_clear_flag(btn_lora_chat_send, LV_OBJ_FLAG_HIDDEN);
   lv_obj_t *btn_close_chat = lv_btn_create(lora_chat_panel); // Corrected to be a single declaration
+  lv_obj_set_size(btn_close_chat, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
+  lv_obj_align(btn_close_chat, LV_ALIGN_BOTTOM_LEFT, UI::Layout::Margin, -UI::Layout::Padding);
   lv_obj_add_style(btn_close_chat, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_chat, [](lv_event_t *e) {
       lv_obj_add_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN);
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lbl_close_chat = lv_label_create(btn_close_chat); lv_label_set_text(lbl_close_chat, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_chat);
   lv_obj_t *btn_lora_chat_clear = lv_btn_create(lora_chat_panel); // Corrected to be a single declaration
-  lv_obj_add_style(btn_lora_chat_clear, &style_btn_dark, 0);
+  lv_obj_set_size(btn_lora_chat_clear, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
+  lv_obj_align(btn_lora_chat_clear, LV_ALIGN_BOTTOM_RIGHT, -UI::Layout::Margin, -UI::Layout::Padding);
+  lv_obj_add_style(btn_lora_chat_clear, &style_btn_red, 0);
   lv_obj_add_event_cb(btn_lora_chat_clear, [](lv_event_t *e) {
       if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
           g_app_context.lora.chat_data[0] = '\0'; // Wipe the buffer cleanly
@@ -847,7 +835,7 @@ void ui_build() {
           xSemaphoreGive(g_app_context.lora.mutex);
       }
   }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_lora_chat_clear = lv_label_create(btn_lora_chat_clear); lv_label_set_text(lbl_lora_chat_clear, "CLEAR"); lv_obj_center(lbl_lora_chat_clear);
+  lv_obj_t *lbl_lora_chat_clear = lv_label_create(btn_lora_chat_clear); lv_label_set_text(lbl_lora_chat_clear, LV_SYMBOL_TRASH " CLEAR"); lv_obj_center(lbl_lora_chat_clear);
 
   // ── LoRa Tab Hub ──────────────────────────────
   lv_obj_set_style_pad_all(tab_lora, 0, 0);
@@ -949,4 +937,14 @@ void ui_build() {
   lv_obj_add_flag(low_batt_border, LV_OBJ_FLAG_HIDDEN | LV_OBJ_FLAG_IGNORE_LAYOUT);
   no_scroll(low_batt_border);
   lv_obj_set_style_border_side(low_batt_border, LV_BORDER_SIDE_FULL, 0);
+
+  // ── Temperature Warning Overlay ────────────────
+  temp_warning_border = lv_obj_create(lv_layer_top());
+  lv_obj_set_size(temp_warning_border, SCREEN_W, SCREEN_H);
+  lv_obj_set_style_bg_opa(temp_warning_border, 0, 0);
+  lv_obj_set_style_border_color(temp_warning_border, lv_color_hex(UI::Colors::Warning), 0);
+  lv_obj_set_style_border_width(temp_warning_border, 4, 0);
+  lv_obj_add_flag(temp_warning_border, LV_OBJ_FLAG_HIDDEN | LV_OBJ_FLAG_IGNORE_LAYOUT);
+  no_scroll(temp_warning_border);
+  lv_obj_set_style_border_side(temp_warning_border, LV_BORDER_SIDE_FULL, 0);
 }

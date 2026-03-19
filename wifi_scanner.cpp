@@ -50,6 +50,43 @@ void run_ap_scan(AppContext *ctx) {
     WiFi.scanNetworks(true); // async scan
 }
 
+// Helper to add/update STA records - Marked IRAM_ATTR for safe calling from promiscuous callback
+void IRAM_ATTR add_or_update_sta(AppContext* ctx, const uint8_t* mac, const uint8_t* ap_bssid, int8_t rssi, bool hasAP) {
+    if (!ctx || !ctx->wifi_scan.mutex) return;
+
+    // Use a non-blocking take for the mutex, as this is called from promiscuous callback
+    // or a high-priority task. If it fails, we drop the packet for this cycle.
+    if (xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(0)) == pdTRUE) {
+        bool found = false;
+        for (int i = 0; i < ctx->wifi_scan.sta_count; i++) {
+            if (memcmp(ctx->wifi_scan.sta_list[i].mac, mac, 6) == 0) {
+                // Update existing STA
+                ctx->wifi_scan.sta_list[i].rssi = rssi;
+                ctx->wifi_scan.sta_list[i].lastSeen = millis();
+                ctx->wifi_scan.sta_list[i].active = true;
+                if (hasAP) {
+                    memcpy(ctx->wifi_scan.sta_list[i].apBssid, ap_bssid, 6);
+                    ctx->wifi_scan.sta_list[i].hasAP = true;
+                }
+                found = true;
+                break;
+            }
+        }
+
+        if (!found && ctx->wifi_scan.sta_count < MAX_STAS) {
+            // Add new STA
+            StaRecord& new_sta = ctx->wifi_scan.sta_list[ctx->wifi_scan.sta_count];
+            memcpy(new_sta.mac, mac, 6);
+            new_sta.rssi = rssi;
+            new_sta.lastSeen = millis();
+            new_sta.active = true;
+            if (hasAP) { memcpy(new_sta.apBssid, ap_bssid, 6); new_sta.hasAP = true; } else { memset(new_sta.apBssid, 0, 6); new_sta.hasAP = false; }
+            ctx->wifi_scan.sta_count++;
+        }
+        xSemaphoreGive(ctx->wifi_scan.mutex);
+    }
+}
+
 void render_scan_list(AppContext *ctx) {
     if (!ctx || !scan_list || !lbl_scan_count) return;
 
@@ -309,6 +346,16 @@ void scan_tick(lv_timer_t *timer) {
                 }
                 WiFi.scanDelete();
                 ui_scan_dirty = true;
+
+                // STA cleanup: Mark old STAs as inactive
+                if (ctx->wifi_scan.mutex && xSemaphoreTake(ctx->wifi_scan.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    for (int i = 0; i < ctx->wifi_scan.sta_count; i++) {
+                        if (millis() - ctx->wifi_scan.sta_list[i].lastSeen > STA_TIMEOUT_MS) {
+                            ctx->wifi_scan.sta_list[i].active = false;
+                        }
+                    }
+                    xSemaphoreGive(ctx->wifi_scan.mutex);
+                }
                 
                 if (!ctx->wifi_scan.paused) {
                     esp_wifi_set_promiscuous(true);
