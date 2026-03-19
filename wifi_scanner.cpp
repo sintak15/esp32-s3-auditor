@@ -1,6 +1,7 @@
 #include "wifi_scanner.h"
 #include "constants.h"
 #include "types.h"
+#include "pcap_and_probes.h"
 #include <WiFi.h>
 #include <esp_wifi.h>
 
@@ -341,6 +342,12 @@ void scan_tick(lv_timer_t *timer) {
         return; 
     }
 
+    // STA/LINKED views are driven by promiscuous sniffing, so keep the list refreshing even
+    // when AP scan results haven't changed.
+    if (ctx->wifi_scan.view != VIEW_AP) {
+        ui_scan_dirty = true;
+    }
+
     switch (phase) {
         case 0: {
             int16_t n = WiFi.scanComplete();
@@ -376,6 +383,7 @@ void scan_tick(lv_timer_t *timer) {
                 }
                 
                 if (!ctx->wifi_scan.paused) {
+                    esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
                     esp_wifi_set_promiscuous(true);
                 }
             } else if (n == WIFI_SCAN_FAILED) {

@@ -5,6 +5,9 @@
 #include <Wire.h>
 #include <esp_heap_caps.h>
 
+static uint8_t g_user_backlight = 255;
+static bool g_screen_dimmed = false;
+
 // Forward declare from ui_module
 extern lv_obj_t *lbl_batt, *lbl_batt_pct, *lbl_sd, *lbl_wifi, *lbl_msg;
 extern lv_obj_t *ta_lora_log;
@@ -45,6 +48,16 @@ static char* log_copy_buf = nullptr;
 static char* chat_copy_buf = nullptr;
 
 static AppContext* ui_context = nullptr;
+
+void display_set_backlight(uint8_t duty) {
+    g_user_backlight = duty;
+    g_screen_dimmed = false;
+    ledcWrite(TFT_BL, duty);
+}
+
+uint8_t display_get_backlight() {
+    return g_user_backlight;
+}
 
 extern void get_last_crash_states(char* c0, char* c1, size_t max_len);
 extern bool is_emergency_heap();
@@ -146,6 +159,8 @@ void display_init() {
     // Core 3.x syntax: Attach pin directly to frequency and resolution
     ledcAttach(TFT_BL, BT_PWM_FREQ, BT_PWM_RES);
     ledcWrite(TFT_BL, 255);
+    g_user_backlight = 255;
+    g_screen_dimmed = false;
 
     pinMode(TP_RST, OUTPUT);
     digitalWrite(TP_RST, LOW);
@@ -609,12 +624,12 @@ void ui_update_tick(lv_timer_t *timer) {
         }
     }
 
-    // Screen Dimming Timeout (60 seconds)
-    static int last_backlight = -1;
-    int current_backlight = (lv_disp_get_inactive_time(NULL) > 60000) ? LOW : HIGH;
-    if (current_backlight != last_backlight) {
-        digitalWrite(TFT_BL, current_backlight);
-        last_backlight = current_backlight;
+    // Screen timeout: turn off backlight after 10 minutes of inactivity.
+    static constexpr uint32_t SCREEN_TIMEOUT_MS = 10UL * 60UL * 1000UL;
+    const bool should_dim = (lv_disp_get_inactive_time(NULL) > SCREEN_TIMEOUT_MS);
+    if (should_dim != g_screen_dimmed) {
+        g_screen_dimmed = should_dim;
+        ledcWrite(TFT_BL, g_screen_dimmed ? 0 : g_user_backlight);
     }
 
     if (millis() - t_stage > 5) Serial.printf("[UI] misc block %lu ms\n", (unsigned long)(millis() - t_stage));

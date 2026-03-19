@@ -154,29 +154,50 @@ void process_probe_queue(AppContext* context) {
 }
 
 void process_channel_hop(AppContext* context) {
-    if (!g_app_context.sniffer.pcap_active && !g_app_context.sniffer.probe_active) return;
-    if (millis() - g_app_context.sniffer.last_hop_ms < CHANNEL_HOP_INTERVAL_MS) return;
+    // 1) PCAP / Probe sniffers (existing behavior)
+    if (g_app_context.sniffer.pcap_active || g_app_context.sniffer.probe_active) {
+        if (millis() - g_app_context.sniffer.last_hop_ms < CHANNEL_HOP_INTERVAL_MS) return;
 
-    if (!g_app_context.sniffer.pcap_ch_locked) { // Use g_app_context.sniffer.pcap_ch_locked
-        g_app_context.sniffer.channel++;
-        if (g_app_context.sniffer.channel > 13) g_app_context.sniffer.channel = 1;
-    } else {
-        g_app_context.sniffer.channel = g_app_context.sniffer.pcap_locked_ch;
+        if (!g_app_context.sniffer.pcap_ch_locked) {
+            g_app_context.sniffer.channel++;
+            if (g_app_context.sniffer.channel > 13) g_app_context.sniffer.channel = 1;
+        } else {
+            g_app_context.sniffer.channel = g_app_context.sniffer.pcap_locked_ch;
+        }
+        
+        esp_wifi_set_channel(g_app_context.sniffer.channel, WIFI_SECOND_CHAN_NONE);
+        g_app_context.sniffer.last_hop_ms = millis();
+        
+        static uint32_t last_ui = 0;
+        if (g_app_context.sniffer.pcap_active && millis() - last_ui >= 500) {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu",
+                     g_app_context.sniffer.pcap_ch_locked ? "#FF8800 LOCKED# " : "",
+                     g_app_context.sniffer.channel,
+                     g_app_context.sniffer.pcap_packet_count);
+            queue_local_ui_text(UI_EVT_SET_PCAP_STATUS, buf);
+            last_ui = millis();
+        }
+        return;
     }
-    
-    esp_wifi_set_channel(g_app_context.sniffer.channel, WIFI_SECOND_CHAN_NONE);
-    g_app_context.sniffer.last_hop_ms = millis();
-    
-    static uint32_t last_ui = 0;
-    if (g_app_context.sniffer.pcap_active && millis() - last_ui >= 500) {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "#FFFF00 PCAP ACTIVE#\n\n%sCH: %d  Pkts: %lu",
-                 g_app_context.sniffer.pcap_ch_locked ? "#FF8800 LOCKED# " : "",
-                 g_app_context.sniffer.channel,
-                 g_app_context.sniffer.pcap_packet_count);
-        queue_local_ui_text(UI_EVT_SET_PCAP_STATUS, buf);
-        last_ui = millis();
-    }
+
+    // 2) WiFi scan STA discovery: hop channels while between active scans so the STA/LINKED views populate.
+    if (!(g_app_context.wifi_scan.started && !g_app_context.wifi_scan.paused)) return;
+    if (g_app_context.audit.current_mode != AUDIT_NONE) return;
+
+    // Do not fight active AP scans (promiscuous must be off during scanNetworks).
+    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;
+
+    static uint32_t last_scan_hop_ms = 0;
+    static uint8_t scan_ch = 1;
+    static constexpr uint32_t SCAN_HOP_INTERVAL_MS = 250;
+
+    if (millis() - last_scan_hop_ms < SCAN_HOP_INTERVAL_MS) return;
+
+    scan_ch++;
+    if (scan_ch > 13) scan_ch = 1;
+    esp_wifi_set_channel(scan_ch, WIFI_SECOND_CHAN_NONE);
+    last_scan_hop_ms = millis();
 }
 
 void start_pcap(AppContext* context) {

@@ -5,6 +5,7 @@
 #include "pentest_attacks.h" // For save_beacon_ssids_to_nvs
 #include "types.h" // Includes constants.h indirectly
 #include "constants.h" // Explicitly include constants.h for MAX_BEACON_SSIDS etc.
+#include "display.h"
 
 // Global AppContext instance (defined in main .ino file)
 extern AppContext g_app_context;
@@ -445,44 +446,54 @@ void ui_build() {
   // ── Settings Tab ──────────────────────────────
   lv_obj_set_style_pad_all(tab_settings, 6, 0);
 
+  const int settings_gap = 6;
+  const int settings_step = UI::Layout::ButtonHeight + settings_gap;
+  const int settings_btn_w = SCREEN_W - (UI::Layout::Margin * 2);
+
   lv_obj_t *btn_open_beacon_ssids = make_atk_btn(tab_settings, LV_SYMBOL_EDIT " BEACON SSIDs", &style_btn_dark, 0xAAAAAA, [](lv_event_t *e) {
       navigate_to(9); 
   }, UI::Layout::Padding);
   lv_obj_clear_flag(btn_open_beacon_ssids, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_size(btn_open_beacon_ssids, settings_btn_w, UI::Layout::ButtonHeight);
 
   lv_obj_t *btn_open_diag = make_atk_btn(tab_settings, LV_SYMBOL_SETTINGS " SYSTEM DIAGNOSTICS", &style_btn_dark, 0x00FFCC, [](lv_event_t *e) {
       navigate_to(10);
-  }, UI::Layout::Padding + UI::Layout::ButtonHeight + UI::Layout::Padding); // Corrected y position
+  }, UI::Layout::Padding + settings_step);
   lv_obj_clear_flag(btn_open_diag, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_diag,0), lv_color_hex(UI::Colors::Primary), 0);
+  lv_obj_set_size(btn_open_diag, settings_btn_w, UI::Layout::ButtonHeight);
 
   lv_obj_t *btn_open_sys_stats = make_atk_btn(tab_settings, LV_SYMBOL_LIST " PERFORMANCE STATS", &style_btn_dark, 0xFFAA00, [](lv_event_t *e) {
       navigate_to(11);
-  }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 2); // Corrected y position
+  }, UI::Layout::Padding + settings_step * 2);
   lv_obj_clear_flag(btn_open_sys_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_sys_stats,0), lv_color_hex(UI::Colors::Warning), 0);
+  lv_obj_set_size(btn_open_sys_stats, settings_btn_w, UI::Layout::ButtonHeight);
 
   lv_obj_t *btn_open_batt_stats = make_atk_btn(tab_settings, LV_SYMBOL_BATTERY_3 " BATTERY STATS", &style_btn_dark, 0x00FF88, [](lv_event_t *e) {
       navigate_to(12);
-  }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 3); // Corrected y position
+  }, UI::Layout::Padding + settings_step * 3);
   lv_obj_clear_flag(btn_open_batt_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_batt_stats,0), lv_color_hex(UI::Colors::Success), 0);
+  lv_obj_set_size(btn_open_batt_stats, settings_btn_w, UI::Layout::ButtonHeight);
 
   lv_obj_t *btn_open_reboot = make_atk_btn(tab_settings, LV_SYMBOL_POWER " REBOOT", &style_btn_dark, 0xFF4444, [](lv_event_t *e) {
       navigate_to(13);
-  }, UI::Layout::Padding + (UI::Layout::ButtonHeight + UI::Layout::Padding) * 4);
+  }, UI::Layout::Padding + settings_step * 4);
   lv_obj_clear_flag(btn_open_reboot, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_reboot,0), lv_color_hex(UI::Colors::Error), 0);
+  lv_obj_set_size(btn_open_reboot, settings_btn_w, UI::Layout::ButtonHeight);
 
   // Brightness Slider
+  const int slider_y = UI::Layout::Padding + settings_step * 5 + 12;
   lv_obj_t *slider_bright = lv_slider_create(tab_settings);
-  lv_obj_set_size(slider_bright, SCREEN_W - 60, 12);
-  lv_obj_align(slider_bright, LV_ALIGN_TOP_MID, 0, 220);
+  lv_obj_set_size(slider_bright, settings_btn_w, 12);
+  lv_obj_align(slider_bright, LV_ALIGN_TOP_MID, 0, slider_y);
   lv_slider_set_range(slider_bright, 10, 255);
   lv_slider_set_value(slider_bright, 255, LV_ANIM_OFF);
   lv_obj_add_event_cb(slider_bright, [](lv_event_t *e) {
       int v = lv_slider_get_value(lv_event_get_target(e));
-      ledcWrite(TFT_BL, v); // Write directly to the pin in Core 3.x
+      display_set_backlight((uint8_t)v);
   }, LV_EVENT_VALUE_CHANGED, nullptr);
   lv_obj_t *lbl_br = lv_label_create(tab_settings);
   lv_label_set_text(lbl_br, LV_SYMBOL_SETTINGS " SCREEN BRIGHTNESS");
-  lv_obj_align_to(lbl_br, slider_bright, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
+  lv_obj_align(lbl_br, LV_ALIGN_TOP_MID, 0, slider_y - 16);
 
   add_return_btn(tab_settings);
 
@@ -792,6 +803,7 @@ void ui_build() {
   lv_obj_set_style_border_width(lora_log_panel, 2, 0);
   lv_obj_add_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN);
   no_scroll(lora_log_panel);
+  lv_obj_set_style_pad_all(lora_log_panel, 0, 0);
 
   lv_obj_t *lbl_log_title = lv_label_create(lora_log_panel);
   lv_label_set_text(lbl_log_title, "#00AAFF " LV_SYMBOL_FILE " LORA TERMINAL#");
@@ -814,20 +826,31 @@ void ui_build() {
   lv_obj_set_size(btn_lora_send, 70, 40);
   lv_obj_align(btn_lora_send, LV_ALIGN_TOP_RIGHT, -5, 140);
   lv_obj_clear_flag(btn_lora_send, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_t *btn_close_log = lv_btn_create(lora_log_panel); // Corrected to be a single declaration
-  lv_obj_set_size(btn_close_log, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
-  lv_obj_add_flag(btn_close_log, LV_OBJ_FLAG_IGNORE_LAYOUT);
-  lv_obj_align(btn_close_log, LV_ALIGN_BOTTOM_LEFT, UI::Layout::Margin, -UI::Layout::Padding);
+  // Footer row: prevents CLOSE/CLEAR overlap across themes/padding changes.
+  lv_obj_t *log_footer = lv_obj_create(lora_log_panel);
+  lv_obj_add_flag(log_footer, LV_OBJ_FLAG_IGNORE_LAYOUT);
+  lv_obj_set_size(log_footer, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
+  lv_obj_align(log_footer, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
+  lv_obj_set_style_bg_opa(log_footer, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(log_footer, 0, 0);
+  lv_obj_set_style_pad_all(log_footer, 0, 0);
+  lv_obj_set_style_pad_gap(log_footer, UI::Layout::Padding, 0);
+  lv_obj_set_flex_flow(log_footer, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(log_footer, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  no_scroll(log_footer);
+
+  lv_obj_t *btn_close_log = lv_btn_create(log_footer);
+  lv_obj_set_size(btn_close_log, 0, UI::Layout::ButtonHeight);
+  lv_obj_set_flex_grow(btn_close_log, 1);
   lv_obj_add_style(btn_close_log, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_log, [](lv_event_t *e) {
       lv_obj_add_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN);
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lbl_close_log = lv_label_create(btn_close_log); lv_label_set_text(lbl_close_log, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_log);
 
-  lv_obj_t *btn_lora_clear = lv_btn_create(lora_log_panel); // Corrected to be a single declaration
-  lv_obj_set_size(btn_lora_clear, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
-  lv_obj_add_flag(btn_lora_clear, LV_OBJ_FLAG_IGNORE_LAYOUT);
-  lv_obj_align(btn_lora_clear, LV_ALIGN_BOTTOM_RIGHT, -UI::Layout::Margin, -UI::Layout::Padding);
+  lv_obj_t *btn_lora_clear = lv_btn_create(log_footer);
+  lv_obj_set_size(btn_lora_clear, 0, UI::Layout::ButtonHeight);
+  lv_obj_set_flex_grow(btn_lora_clear, 1);
   lv_obj_add_style(btn_lora_clear, &style_btn_red, 0);
   lv_obj_add_event_cb(btn_lora_clear, [](lv_event_t *e) {
       if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
@@ -847,6 +870,7 @@ void ui_build() {
   lv_obj_set_style_border_width(lora_chat_panel, 2, 0);
   lv_obj_add_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN);
   no_scroll(lora_chat_panel);
+  lv_obj_set_style_pad_all(lora_chat_panel, 0, 0);
 
   lv_obj_t *lbl_chat_title = lv_label_create(lora_chat_panel);
   lv_label_set_text(lbl_chat_title, "#00FF88 " LV_SYMBOL_KEYBOARD " LORA CHAT#");
@@ -869,19 +893,31 @@ void ui_build() {
   lv_obj_set_size(btn_lora_chat_send, 70, 40);
   lv_obj_align(btn_lora_chat_send, LV_ALIGN_TOP_RIGHT, -5, 140);
   lv_obj_clear_flag(btn_lora_chat_send, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_t *btn_close_chat = lv_btn_create(lora_chat_panel); // Corrected to be a single declaration
-  lv_obj_set_size(btn_close_chat, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
-  lv_obj_add_flag(btn_close_chat, LV_OBJ_FLAG_IGNORE_LAYOUT);
-  lv_obj_align(btn_close_chat, LV_ALIGN_BOTTOM_LEFT, UI::Layout::Margin, -UI::Layout::Padding);
+  // Footer row: prevents CLOSE/CLEAR overlap across themes/padding changes.
+  lv_obj_t *chat_footer = lv_obj_create(lora_chat_panel);
+  lv_obj_add_flag(chat_footer, LV_OBJ_FLAG_IGNORE_LAYOUT);
+  lv_obj_set_size(chat_footer, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
+  lv_obj_align(chat_footer, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
+  lv_obj_set_style_bg_opa(chat_footer, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(chat_footer, 0, 0);
+  lv_obj_set_style_pad_all(chat_footer, 0, 0);
+  lv_obj_set_style_pad_gap(chat_footer, UI::Layout::Padding, 0);
+  lv_obj_set_flex_flow(chat_footer, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(chat_footer, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  no_scroll(chat_footer);
+
+  lv_obj_t *btn_close_chat = lv_btn_create(chat_footer);
+  lv_obj_set_size(btn_close_chat, 0, UI::Layout::ButtonHeight);
+  lv_obj_set_flex_grow(btn_close_chat, 1);
   lv_obj_add_style(btn_close_chat, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_chat, [](lv_event_t *e) {
       lv_obj_add_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN);
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lbl_close_chat = lv_label_create(btn_close_chat); lv_label_set_text(lbl_close_chat, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_chat);
-  lv_obj_t *btn_lora_chat_clear = lv_btn_create(lora_chat_panel); // Corrected to be a single declaration
-  lv_obj_set_size(btn_lora_chat_clear, (SCREEN_W - (UI::Layout::Margin * 2) - UI::Layout::Padding) / 2, UI::Layout::ButtonHeight);
-  lv_obj_add_flag(btn_lora_chat_clear, LV_OBJ_FLAG_IGNORE_LAYOUT);
-  lv_obj_align(btn_lora_chat_clear, LV_ALIGN_BOTTOM_RIGHT, -UI::Layout::Margin, -UI::Layout::Padding);
+
+  lv_obj_t *btn_lora_chat_clear = lv_btn_create(chat_footer);
+  lv_obj_set_size(btn_lora_chat_clear, 0, UI::Layout::ButtonHeight);
+  lv_obj_set_flex_grow(btn_lora_chat_clear, 1);
   lv_obj_add_style(btn_lora_chat_clear, &style_btn_red, 0);
   lv_obj_add_event_cb(btn_lora_chat_clear, [](lv_event_t *e) {
       if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
