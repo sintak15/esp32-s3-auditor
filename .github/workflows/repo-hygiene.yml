@@ -1,0 +1,26 @@
+name: Repo hygiene
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Block build outputs in git
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad="$(git ls-files | grep -E '^(build/|\\.theia/|\\.vscode/arduino\\.json$)|\\.(bin|elf|map)$' || true)"
+          if [[ -n "${bad}" ]]; then
+            echo "Disallowed tracked files detected:"
+            echo "${bad}"
+            echo
+            echo "These should be ignored and not committed (see .gitignore)."
+            exit 1
+          fi
+
