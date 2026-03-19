@@ -12,10 +12,10 @@
 /* Enum definitions */
 /* How this channel is being used (or not).
  Note: this field is an enum to give us options for the future.
- In particular, someday we might make an 'AUDITING' option.
- AUDITING channels could have different frequencies and the radio would
+ In particular, someday we might make a 'SCANNING' option.
+ SCANNING channels could have different frequencies and the radio would
  occasionally check that freq to see if anything is being transmitted.
- For devices that have multiple physical radios connected, we could keep multiple PRIMARY/AUDITING channels active at once to allow
+ For devices that have multiple physical radios attached, we could keep multiple PRIMARY/SCANNING channels active at once to allow
  cross band routing as needed.
  If a device has only a single radio (the common case) only one channel can be PRIMARY at a time
  (but any number of SECONDARY channels can't be sent received on that common frequency) */

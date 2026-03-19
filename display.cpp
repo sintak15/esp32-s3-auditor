@@ -1,8 +1,12 @@
 #include "display.h"
 #include "constants.h"
+#include "src/UIConfig.h"
 #include <TFT_eSPI.h>
 #include <Wire.h>
 #include <esp_heap_caps.h>
+
+static uint8_t g_user_backlight = 255;
+static bool g_screen_dimmed = false;
 
 // Forward declare from ui_module
 extern lv_obj_t *lbl_batt, *lbl_batt_pct, *lbl_sd, *lbl_wifi, *lbl_msg;
@@ -21,6 +25,14 @@ extern lv_obj_t *ta_diagnostics;
 extern lv_obj_t *sys_stats_panel;
 extern lv_obj_t *ta_sys_stats;
 extern lv_obj_t *lbl_gps_data;
+extern lv_obj_t *low_batt_border;
+extern lv_obj_t *temp_warning_border;
+extern lv_obj_t *lbl_pcap_status; // Added extern for lbl_pcap_status
+extern lv_obj_t *battery_stats_panel;
+extern lv_obj_t *lbl_battery_stats;
+extern lv_obj_t *ui_battery_chart;
+extern lv_chart_series_t *ui_battery_series;
+extern lv_chart_series_t *ui_heap_series;
 
 extern void trace_enter(const char *s);
 extern void trace_exit(const char *s);
@@ -36,6 +48,16 @@ static char* log_copy_buf = nullptr;
 static char* chat_copy_buf = nullptr;
 
 static AppContext* ui_context = nullptr;
+
+void display_set_backlight(uint8_t duty) {
+    g_user_backlight = duty;
+    g_screen_dimmed = false;
+    ledcWrite(TFT_BL, duty);
+}
+
+uint8_t display_get_backlight() {
+    return g_user_backlight;
+}
 
 extern void get_last_crash_states(char* c0, char* c1, size_t max_len);
 extern bool is_emergency_heap();
@@ -134,8 +156,12 @@ static void touch_service_task(void *pv) {
 }
 
 void display_init() {
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
+    // Core 3.x syntax: Attach pin directly to frequency and resolution
+    ledcAttach(TFT_BL, BT_PWM_FREQ, BT_PWM_RES);
+    ledcWrite(TFT_BL, 255);
+    g_user_backlight = 255;
+    g_screen_dimmed = false;
+
     pinMode(TP_RST, OUTPUT);
     digitalWrite(TP_RST, LOW);
     delay(100);
@@ -191,11 +217,14 @@ void display_init() {
     lv_indev_drv_register(&indev_drv);
 }
 
-static StatusSnapshot read_status_snapshot() {
+static StatusSnapshot read_status_snapshot(bool *success) {
   StatusSnapshot s = {};
   if (ui_context && ui_context->status.mutex && xSemaphoreTake(ui_context->status.mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
     s = ui_context->status.snap;
     xSemaphoreGive(ui_context->status.mutex);
+    if (success) *success = true;
+  } else if (success) {
+    *success = false;
   }
   return s;
 }
@@ -225,19 +254,24 @@ void ui_update_tick(lv_timer_t *timer) {
 
     t_stage = millis();
     static int last_batteryPct = -1;
+    static uint32_t last_batteryMv = 0;
     static bool last_isCharging = false;
     static bool last_sdMounted = false;
     static int last_batt_col = -1;
 
-    StatusSnapshot ss = read_status_snapshot();
+    bool ss_ok = false;
+    StatusSnapshot ss = read_status_snapshot(&ss_ok);
+    // If mutex is busy, skip this tick to avoid updating the UI with invalid/zeroed data
+    if (!ss_ok) return;
 
     // Battery
-    uint32_t batt_col = ss.batteryPct < 20 ? 0xFF4444 : ss.batteryPct < 50 ? 0xFFFF00 : 0xFFFFFF;
+    // Note: If isCharging stays true after unplugging, check battery level threshold (>100) in producer task.
+    uint32_t batt_col = ss.batteryPct < 20 ? UI::Colors::Error : ss.batteryPct < 50 ? UI::Colors::Warning : UI::Colors::Text;
     if (ss.isCharging) {
-        batt_col = 0x00FF88; // Bright green when charging
+        batt_col = UI::Colors::Success; // Bright green when charging
     }
     
-    if (ss.batteryPct != last_batteryPct || ss.isCharging != last_isCharging) {
+    if (ss.batteryPct != last_batteryPct || ss.isCharging != last_isCharging || ss.batteryMv != last_batteryMv) {
         if (ss.isCharging) {
             lv_label_set_text(lbl_batt, LV_SYMBOL_CHARGE);
         } else {
@@ -247,11 +281,37 @@ void ui_update_tick(lv_timer_t *timer) {
             else if (ss.batteryPct > 15) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_1);
             else lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_EMPTY);
         }
-        char bpbuf[8];
-        snprintf(bpbuf, sizeof(bpbuf), "%d%%", ss.batteryPct);
+        char bpbuf[24];
+        snprintf(bpbuf, sizeof(bpbuf), "%d%% (%.2fV)", ss.batteryPct, (float)ss.batteryMv / 1000.0f);
         lv_label_set_text(lbl_batt_pct, bpbuf);
         last_batteryPct = ss.batteryPct;
         last_isCharging = ss.isCharging;
+        last_batteryMv = ss.batteryMv;
+    }
+
+    // Toggle Low Battery Alert Border
+    if (low_batt_border) {
+        bool is_low = (ss.batteryPct <= 10 && !ss.isCharging);
+        if (is_low) {
+            lv_obj_clear_flag(low_batt_border, LV_OBJ_FLAG_HIDDEN);
+            // Create a pulsing effect using a triangle wave
+            int opa = 100 + (abs((int)(millis() % 2000) - 1000) / 10); 
+            lv_obj_set_style_border_opa(low_batt_border, opa, 0);
+        } else {
+            lv_obj_add_flag(low_batt_border, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // Toggle Temperature Warning Border
+    if (temp_warning_border) {
+        bool is_hot = (ss.batteryTempC > 55); // Alert above 55C
+        if (is_hot) {
+            lv_obj_clear_flag(temp_warning_border, LV_OBJ_FLAG_HIDDEN);
+            int opa = 100 + (abs((int)(millis() % 1000) - 500) / 5); 
+            lv_obj_set_style_border_opa(temp_warning_border, opa, 0);
+        } else {
+            lv_obj_add_flag(temp_warning_border, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     if ((int)batt_col != last_batt_col) {
@@ -261,7 +321,7 @@ void ui_update_tick(lv_timer_t *timer) {
     }
 
     if (ss.sdMounted != last_sdMounted) {
-        lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? 0x00FF88 : 0xFF4444), 0);
+        lv_obj_set_style_text_color(lbl_sd, lv_color_hex(ss.sdMounted ? UI::Colors::Success : UI::Colors::Error), 0);
         last_sdMounted = ss.sdMounted;
     }
 
@@ -411,7 +471,7 @@ void ui_update_tick(lv_timer_t *timer) {
         if (millis() - last_blink > 500) {
             static bool msg_blink = false;
             msg_blink = !msg_blink;
-            int new_color = msg_blink ? 0x00FF88 : 0x444444;
+            int new_color = msg_blink ? UI::Colors::Success : UI::Colors::Secondary;
             if (new_color != last_msg_color) {
                 lv_obj_set_style_text_color(lbl_msg, lv_color_hex(new_color), 0);
                 last_msg_color = new_color;
@@ -420,15 +480,25 @@ void ui_update_tick(lv_timer_t *timer) {
         }
         last_unread_chat = true;
     } else if (last_unread_chat) { // Revert to gray once only
-        if (last_msg_color != 0x444444) {
+        if (last_msg_color != (int)UI::Colors::Secondary) {
             lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0x444444), 0);
             last_msg_color = 0x444444;
         }
         last_unread_chat = false;
     }
 
+    // Background Battery History Tracking (Updates even when panel is hidden)
+    static uint32_t last_chart_update = 0;
+    if (millis() - last_chart_update > 5000) {
+        if (ui_battery_chart && ui_battery_series && ui_heap_series) {
+            lv_chart_set_next_value(ui_battery_chart, ui_battery_series, ss.batteryMv);
+            lv_chart_set_next_value(ui_battery_chart, ui_heap_series, ESP.getFreeHeap() / 1024);
+        }
+        last_chart_update = millis();
+    }
+
     // Update Diagnostics Panel if visible
-    if (diagnostics_panel && !lv_obj_has_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN) && ta_diagnostics) {
+    if (tabview && lv_tabview_get_tab_act(tabview) == 10 && ta_diagnostics) {
         static uint32_t last_diag_draw = 0;
         if (millis() - last_diag_draw > 1000) {
             char c0[96], c1[96];
@@ -475,13 +545,36 @@ void ui_update_tick(lv_timer_t *timer) {
         }
     }
 
+    // Update Battery Detail Panel if visible
+    if (tabview && lv_tabview_get_tab_act(tabview) == 12 && lbl_battery_stats) {
+        static uint32_t last_batt_draw = 0;
+        if (millis() - last_batt_draw > 500) {
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                "#00FF88 Power Rail Info#\n\n"
+                "#AAAAAA Voltage:#   #FFFFFF %.2f V#\n"
+                "#AAAAAA Capacity:#  #FFFFFF %d %%#\n"
+                "#AAAAAA Status:#    #FFFFFF %s#\n\n"
+                "#AAAAAA Learned 100%%:# #00FF88 %.2f V#\n"
+                "#AAAAAA ADC Pin:#   #FFFFFF GPIO %d#\n"
+                "#AAAAAA V-Divider:# #FFFFFF 1:2 (100k)#\n\n"
+                "#AAAAAA Health:#    #00FF88 OPTIMAL#",
+                (float)ss.batteryMv / 1000.0f,
+                ss.batteryPct,
+                ss.isCharging ? "USB Connected (Charging)" : "On Battery",
+                (float)g_app_context.status.calibrated_max_mv / 1000.0f,
+                BATT_ADC);
+            lv_label_set_text(lbl_battery_stats, buf);
+            last_batt_draw = millis();
+        }
+    }
+
     // Update System Stats Panel if visible
-    if (sys_stats_panel && !lv_obj_has_flag(sys_stats_panel, LV_OBJ_FLAG_HIDDEN) && ta_sys_stats) {
+    if (tabview && lv_tabview_get_tab_act(tabview) == 11 && ta_sys_stats) {
         static uint32_t last_sys_stats_draw = 0;
-        if (millis() - last_sys_stats_draw > 1000) {
-            char buf[512];
+        if (millis() - last_sys_stats_draw > 2000) { // Slower refresh for task stats stability
+            char buf[1024]; // Increased buffer for task list
             get_perf_stats(buf, sizeof(buf));
-            
             lv_textarea_set_text(ta_sys_stats, buf);
             last_sys_stats_draw = millis();
         }
@@ -520,7 +613,7 @@ void ui_update_tick(lv_timer_t *timer) {
     if (ui_spinner) {
         bool is_active = (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active || 
                           ui_context->ble.sniff_active || ui_context->ble.flood_active || 
-                          ui_context->pentest.current_mode != PT_NONE);
+                          ui_context->audit.current_mode != AUDIT_NONE);
         static int last_is_active = -1;
         if ((int)is_active != last_is_active) {
             // FIX: Hidden spinners STILL run animation timers and invalidate the screen. 
@@ -531,12 +624,12 @@ void ui_update_tick(lv_timer_t *timer) {
         }
     }
 
-    // Screen Dimming Timeout (60 seconds)
-    static int last_backlight = -1;
-    int current_backlight = (lv_disp_get_inactive_time(NULL) > 60000) ? LOW : HIGH;
-    if (current_backlight != last_backlight) {
-        digitalWrite(TFT_BL, current_backlight);
-        last_backlight = current_backlight;
+    // Screen timeout: turn off backlight after 10 minutes of inactivity.
+    static constexpr uint32_t SCREEN_TIMEOUT_MS = 10UL * 60UL * 1000UL;
+    const bool should_dim = (lv_disp_get_inactive_time(NULL) > SCREEN_TIMEOUT_MS);
+    if (should_dim != g_screen_dimmed) {
+        g_screen_dimmed = should_dim;
+        ledcWrite(TFT_BL, g_screen_dimmed ? 0 : g_user_backlight);
     }
 
     if (millis() - t_stage > 5) Serial.printf("[UI] misc block %lu ms\n", (unsigned long)(millis() - t_stage));

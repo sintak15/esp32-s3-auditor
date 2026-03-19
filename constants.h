@@ -1,5 +1,7 @@
 #pragma once
 
+#define FIRMWARE_VERSION "v1.0.0"
+
 // UI
 #define SCREEN_W 240
 #define SCREEN_H 320
@@ -14,6 +16,10 @@
 
 // Hardware Pins
 #define TFT_BL 45 // Backlight control
+#define BT_PWM_CHANNEL 0
+#define BT_PWM_FREQ    5000
+#define BT_PWM_RES     8
+
 #define TP_RST 18 // Touch reset
 #define I2C_SDA 16 // Touch I2C SDA
 #define I2C_SCL 15 // Touch I2C SCL
@@ -23,7 +29,7 @@
 #define GPS_TX_PIN 44
 #define LORA_RX_PIN 14 // Unencumbered GPIO for Heltec
 #define LORA_TX_PIN 21 // Unencumbered GPIO for Heltec
-#define BATT_ADC 1 // ADC pin for battery voltage reading
+#define BATT_ADC 9 // Verified via ADC scanner (2100mV * 2 = 4.2V)
 
 // WiFi Scanner
 #define MAX_APS 64
@@ -48,6 +54,13 @@
 #define NVS_NAMESPACE "pentester"
 #define NVS_BEACON_SSIDS_KEY "beacon_ssids"
 #define MAX_BEACON_SSIDS 10
+
+// OTA Update Settings
+#define FIRMWARE_VERSION_URL "https://raw.githubusercontent.com/sintak15/esp32-s3-auditor/main/firmware_version.txt"
+#define FIRMWARE_SHA256_URL "https://raw.githubusercontent.com/sintak15/esp32-s3-auditor/main/firmware_sha256.txt"
+#define FIRMWARE_BINARY_URL "https://github.com/sintak15/esp32-s3-auditor/releases/download/v%s/firmware.bin"
+#define OTA_WIFI_SSID "YourWiFiSSID" // WiFi SSID for OTA updates
+#define OTA_WIFI_PASS "YourWiFiPassword" // WiFi Password for OTA updates
 #define MAX_BEACON_SSID_LENGTH 32
 
 // SD Logger File Names

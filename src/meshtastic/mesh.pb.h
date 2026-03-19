@@ -371,7 +371,7 @@ typedef enum _meshtastic_FirmwareEdition {
     meshtastic_FirmwareEdition_SMART_CITIZEN = 1,
     /* Open Sauce, the maker conference held yearly in CA */
     meshtastic_FirmwareEdition_OPEN_SAUCE = 16,
-    /* DEFCON, the yearly auditor conference */
+    /* DEFCON, the yearly hacker conference */
     meshtastic_FirmwareEdition_DEFCON = 17,
     /* Burning Man, the yearly hippie gathering in the desert */
     meshtastic_FirmwareEdition_BURNING_MAN = 18,

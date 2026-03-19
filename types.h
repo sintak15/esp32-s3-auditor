@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint> // Use cstdint for C++ style integer types
+#include "src/UIConfig.h" // Include UIConfig for SCREEN_W, SCREEN_H etc.
 #include "constants.h"
 #include <set> // For std::set<String>
 #include <WString.h> // For String (Arduino String class)
@@ -58,7 +59,7 @@ struct pcap_packet_header {
 
 enum ScanView { VIEW_AP, VIEW_STA, VIEW_LINKED };
 
-enum PentestMode { PT_NONE, PT_DEAUTH, PT_BEACON, PT_PMKID };
+enum AuditMode { AUDIT_NONE, AUDIT_DEAUTH, AUDIT_BEACON, AUDIT_PMKID };
 
 // Custom struct for MAC addresses to avoid String overhead in std::set
 struct MacAddress {
@@ -83,6 +84,8 @@ struct StatusSnapshot {
   bool sdMounted;
   int  batteryPct;
   bool isCharging;
+  uint32_t batteryMv;
+  int batteryTempC; // Added to support temperature monitoring
 };
 
 struct BLERing {
@@ -105,13 +108,16 @@ struct ScanState {
   SemaphoreHandle_t mutex; // Added for thread-safe access to ap_list/sta_list
 };
 
-// Define PentestState
-struct PentestState {
-  PentestMode current_mode;
-  lv_timer_t* pentest_timer;
+// Define AuditState
+struct AuditState {
+  AuditMode current_mode;
+  lv_timer_t* audit_timer;
   int beacon_idx;
   bool pmkid_found;
-  uint8_t pmkid_target_bssid[6]; // Used in pentest_attacks.cpp
+  char pmkid_target_ssid[33];
+  uint8_t pmkid_value[16];
+  uint8_t pmkid_sta_mac[6];
+  uint8_t pmkid_target_bssid[6];
   std::vector<String, PsramAllocator<String>> custom_beacon_ssids; // For user-defined beacon SSIDs
 };
 
@@ -150,6 +156,7 @@ struct BleState {
 struct StatusState {
   StatusSnapshot snap;
   SemaphoreHandle_t mutex;
+  uint32_t calibrated_max_mv; // The learned 100% voltage point
   TaskHandle_t service_task; // Added for Status service task handle
 };
 
@@ -203,7 +210,7 @@ struct GpsState {
 // Main AppContext
 struct AppContext {
   ScanState wifi_scan;
-  PentestState pentest;
+  AuditState audit;
   SnifferState sniffer;
   BleState ble;
   StatusState status;
@@ -214,6 +221,7 @@ struct AppContext {
   TaskHandle_t main_task_handle;
   TaskHandle_t wifi_task_handle;
   TaskHandle_t ui_task_handle;
+  String device_id; // Stores the unique device ID (e.g., MAC address)
 };
 
 // Global AppContext instance (needs to be defined in the main .ino file)

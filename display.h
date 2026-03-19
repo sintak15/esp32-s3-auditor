@@ -11,3 +11,7 @@ void ui_update_tick(lv_timer_t *timer);
 
 // Make the app context available to the UI update tick
 void set_ui_update_context(AppContext* context);
+
+// Backlight control (PWM on TFT_BL)
+void display_set_backlight(uint8_t duty);
+uint8_t display_get_backlight();

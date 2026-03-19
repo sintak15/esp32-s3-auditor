@@ -1,4 +1,4 @@
-# **ESP32-S3 Pentesting Workflows (LVGL High-Perf Edition)**
+# **ESP32-S3 Auditing Workflows (LVGL High-Perf Edition)**
 
 This guide outlines the standard operating procedures for conducting wireless security audits using your upgraded ESP32-S3 suite.
 
@@ -15,7 +15,7 @@ Map the local environment without transmitting any frames.
 
 Capture security data to test WPA2 PSK strength.
 
-1. **Selection:** In the **Scan** tab, tap a target SSID. It will highlight, and the device will automatically switch to the **Pentest** tab.  
+1. **Selection:** In the **Scan** tab, tap a target SSID. It will highlight, and the device will automatically switch to the **Audit** tab.  
 2. **Setup:** Verify the SSID and BSSID match your target.  
 3. **Execution:** Tap **PMKID CAPTURE**. The WiFi icon turns blue. The device will now wait for a client to associate to capture the PMKID handshake.  
 4. **Completion:** Once captured, the status will show "\#00FF88 PMKID CAPTURED\!\#". The data is saved to /PMKID.hc22000 on your SD card.
@@ -24,10 +24,10 @@ Capture security data to test WPA2 PSK strength.
 
 Test how local infrastructure handles frame saturation.
 
-1. **Navigation:** Go to the **Pentest** tab.  
+1. **Navigation:** Go to the **Audit** tab.  
 2. **Deauth Test:** Tap **DEAUTH TEST**. This tests the resilience of client connections (Targeted if a client was picked, otherwise Broadcast).  
 3. **Beacon Flood:** Tap **BEACON FLOOD**. This tests how local devices handle hundreds of "ghost" networks appearing simultaneously.  
-4. **Monitoring:** Switch to the **PCAP** tab while an attack is running to log the traffic for later analysis in Wireshark.
+4. **Monitoring:** Switch to the **PCAP** tab while an audit task is running to log the traffic for later analysis in Wireshark.
 
 ## **Workflow 4: Passive Traffic Analysis (Sniffing)**
 
