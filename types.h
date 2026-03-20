@@ -8,10 +8,10 @@
 #include <freertos/FreeRTOS.h> // For QueueHandle_t and vTaskDelay
 #include <vector> // For std::vector
 #include <freertos/semphr.h> // For SemaphoreHandle_t
-#include <lvgl.h> // For lv_timer_t (used in PentestState)
+#include <lvgl.h> // For lv_timer_t (used in AuditState)
 #include <freertos/task.h> // For TaskHandle_t
 #include <NimBLEDevice.h> // For NimBLEScan (used in BleState)
-#include <FS.h> // For File (used in SnifferState)
+#include <FS.h> // For File (used in CaptureState)
 #include "psram_allocator.h" // Custom allocator to force STL containers into PSRAM
 
 // ──────────────────────────────────────────────
@@ -59,7 +59,7 @@ struct pcap_packet_header {
 
 enum ScanView { VIEW_AP, VIEW_STA, VIEW_LINKED };
 
-enum AuditMode { AUDIT_NONE, AUDIT_DEAUTH, AUDIT_BEACON, AUDIT_PMKID };
+enum AuditMode { AUDIT_NONE, AUDIT_RECONNECT, AUDIT_BEACON, AUDIT_PMKID };
 
 // Custom struct for MAC addresses to avoid String overhead in std::set
 struct MacAddress {
@@ -101,8 +101,8 @@ struct ScanState {
   ScanView view;
   bool paused;
   uint32_t last_scan_ms; // Added to track last AP scan time
-  int selected_net; // Used in pentest_attacks.cpp
-  int deauth_sta_target; // Used in pentest_attacks.cpp
+  int selected_net; // Used in audit_actions.cpp
+  int reconnect_sta_target; // Used in audit_actions.cpp
   bool started; // Added for scan state
   lv_timer_t* scan_timer; // Added for scan timer handle
   SemaphoreHandle_t mutex; // Added for thread-safe access to ap_list/sta_list
@@ -121,8 +121,8 @@ struct AuditState {
   std::vector<String, PsramAllocator<String>> custom_beacon_ssids; // For user-defined beacon SSIDs
 };
 
-// Define SnifferState
-struct SnifferState {
+// Define CaptureState
+struct CaptureState {
   volatile bool pcap_active; // Made volatile for multi-task access
   volatile bool probe_active; // Made volatile for multi-task access
   QueueHandle_t pcap_queue;
@@ -139,8 +139,8 @@ struct SnifferState {
 
 // Define BleState
 struct BleState {
-  bool sniff_active;
-  bool flood_active;
+  bool scan_active;
+  bool adv_test_active;
   bool busy;
   bool nimble_ready;
   NimBLEScan* scanner; // NimBLEScan is a static object, no need to manage its memory directly
@@ -211,7 +211,7 @@ struct GpsState {
 struct AppContext {
   ScanState wifi_scan;
   AuditState audit;
-  SnifferState sniffer;
+  CaptureState capture;
   BleState ble;
   StatusState status;
   LoraState lora;

@@ -40,7 +40,7 @@ const char* enc_str(uint8_t enc) {
     }
 }
 
-void restore_sta_sniffer(AppContext *ctx) {
+void restore_sta_monitor(AppContext *ctx) {
     // Deprecated: Promiscuous mode is now safely toggled dynamically by run_ap_scan and scan_tick
 }
 
@@ -192,7 +192,7 @@ void render_scan_list(AppContext *ctx) {
                  ctx->wifi_scan.ap_count, ctx->wifi_scan.sta_count);
         lv_label_set_text(lbl_scan_count, count_buf);
 
-        // View change: just hide the pool, do not destroy anything.
+        // View change: just hide the pool; do not remove anything.
         if (last_view != ctx->wifi_scan.view) {
             hide_all_items();
             last_view = ctx->wifi_scan.view;
@@ -292,7 +292,7 @@ void render_scan_list(AppContext *ctx) {
                     char txt[128];
                     snprintf(txt, sizeof(txt), "  %s (%ddBm)", mac, ctx->wifi_scan.sta_list[j].rssi);
 
-                    // Pass AP index for targeting, same as your old code.
+                    // Pass AP index for selection context, same as your old code.
                     set_item(slot, LV_SYMBOL_RIGHT, txt, (intptr_t)i);
                     slot++;
                     found_any = true;
@@ -342,7 +342,7 @@ void scan_tick(lv_timer_t *timer) {
         return; 
     }
 
-    // STA/LINKED views are driven by promiscuous sniffing, so keep the list refreshing even
+    // STA/LINKED views are driven by promiscuous monitoring, so keep the list refreshing even
     // when AP scan results haven't changed.
     if (ctx->wifi_scan.view != VIEW_AP) {
         ui_scan_dirty = true;

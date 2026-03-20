@@ -459,7 +459,7 @@ typedef enum _meshtastic_Routing_Error {
     meshtastic_Routing_Error_TIMEOUT = 3,
     /* No suitable interface could be found for delivering this packet */
     meshtastic_Routing_Error_NO_INTERFACE = 4,
-    /* We reached the max retransmission count (typically for naive flood routing) */
+    /* We reached the max retransmission count (typically for naive broadcast routing) */
     meshtastic_Routing_Error_MAX_RETRANSMIT = 5,
     /* No suitable channel was found for sending this packet (i.e. was requested channel index disabled?) */
     meshtastic_Routing_Error_NO_CHANNEL = 6,
@@ -916,10 +916,10 @@ typedef struct _meshtastic_MeshPacket {
     };
     /* A unique ID for this packet.
  Always 0 for no-ack packets or non broadcast packets (and therefore take zero bytes of space).
- Otherwise a unique ID for this packet, useful for flooding algorithms.
+ Otherwise a unique ID for this packet, useful for rebroadcast algorithms.
  ID only needs to be unique on a _per sender_ basis, and it only
  needs to be unique for a few minutes (long enough to last for the length of
- any ACK or the completion of a mesh broadcast flood).
+ any ACK or the completion of a mesh broadcast propagation).
  Note: Our crypto implementation uses this id as well.
  See [crypto](/docs/overview/encryption) for details. */
     uint32_t id;
@@ -940,10 +940,10 @@ typedef struct _meshtastic_MeshPacket {
     /* This packet is being sent as a reliable message, we would prefer it to arrive at the destination.
  We would like to receive a ack packet in response.
  Broadcasts messages treat this flag specially: Since acks for broadcasts would
- rapidly flood the channel, the normal ack behavior is suppressed.
- Instead, the original sender listens to see if at least one node is rebroadcasting this packet (because naive flooding algorithm).
+ rapidly load the channel, the normal ack behavior is suppressed.
+ Instead, the original sender listens to see if at least one node is rebroadcasting this packet (because naive rebroadcast algorithm).
  If it hears that the odds (given typical LoRa topologies) the odds are very high that every node should eventually receive the message.
- So FloodingRouter.cpp generates an implicit ack which is delivered to the original sender.
+ So the router generates an implicit ack which is delivered to the original sender.
  If after some time we don't hear anyone rebroadcast our packet, we will timeout and retransmit, using the regular resend logic.
  Note: This flag is normally sent in a flag bit in the header when sent over the wire */
     bool want_ack;

@@ -2,7 +2,7 @@
 #include "sd_logger.h"
 #include <Arduino.h>
 #include <nvs_flash.h> // For NVS functions
-#include "pentest_attacks.h" // For save_beacon_ssids_to_nvs
+#include "audit_actions.h" // For save_beacon_ssids_to_nvs
 #include "types.h" // Includes constants.h indirectly
 #include "constants.h" // Explicitly include constants.h for MAX_BEACON_SSIDS etc.
 #include "display.h"
@@ -18,13 +18,13 @@ lv_obj_t *tab_home, *tab_scan, *tab_audit, *tab_ble, *tab_pcap, *tab_probes, *ta
 lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
 lv_obj_t *lbl_audit_target, *lbl_audit_bssid, *lbl_audit_status;
-lv_obj_t *btn_deauth, *btn_beacon, *btn_pmkid, *btn_stop_audit;
+lv_obj_t *btn_reconnect, *btn_beacon, *btn_pmkid, *btn_stop_audit;
 lv_obj_t *lbl_ble_status;
 lv_obj_t *lbl_pcap_ch;
 lv_obj_t *btn_pcap_lock;
 lv_obj_t *probe_list;
-lv_obj_t *btn_ble_sniff  = nullptr;
-lv_obj_t *btn_ble_flood  = nullptr;
+lv_obj_t *btn_ble_scan  = nullptr;
+lv_obj_t *btn_ble_adv_test  = nullptr;
 lv_obj_t *btn_pcap_start = nullptr;
 lv_obj_t *ta_beacon_ssids = nullptr; // Text area for beacon SSIDs (declared here)
 lv_obj_t *btn_probe_start = nullptr; // Corrected to be a single declaration
@@ -62,7 +62,6 @@ lv_obj_t *sys_stats_panel = nullptr;
 lv_obj_t *ta_sys_stats = nullptr;
 
 extern void toggle_web_server();
-extern void spoof_mac();
 extern void reboot_cyd();
 
 lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
@@ -84,7 +83,7 @@ void init_btn_style(lv_style_t *s, uint32_t bg, uint32_t border) {
   lv_style_set_radius(s, 6);
 }
 
-lv_obj_t* make_atk_btn(lv_obj_t *parent, const char *label, lv_style_t *style,
+lv_obj_t* make_action_btn(lv_obj_t *parent, const char *label, lv_style_t *style,
                         uint32_t tc, lv_event_cb_t cb, int y) {
   lv_obj_t *b = lv_btn_create(parent); 
   lv_obj_align(b, LV_ALIGN_TOP_MID, 0, y); lv_obj_add_style(b, style, 0);
@@ -304,7 +303,7 @@ void ui_build() {
   lv_obj_set_style_pad_all(tab_audit, 6, 0);
   lbl_audit_target = lv_label_create(tab_audit);
   lv_label_set_recolor(lbl_audit_target, true);
-  lv_label_set_text(lbl_audit_target, "#888888 Select a target from SCAN#");
+  lv_label_set_text(lbl_audit_target, "#888888 Select a network from SCAN#");
   lv_obj_set_width(lbl_audit_target, SCREEN_W - (UI::Layout::Margin * 2));
   // FIX: SCROLL_CIRCULAR runs an infinite animation timer that invalidates the screen even when idle
   lv_label_set_long_mode(lbl_audit_target, LV_LABEL_LONG_DOT);
@@ -322,16 +321,16 @@ void ui_build() {
   lv_obj_set_width(lbl_audit_status, SCREEN_W - 20);
   lv_obj_align(lbl_audit_status, LV_ALIGN_TOP_MID, 0, 42);
   int y=62;
-  btn_deauth = make_atk_btn(tab_audit, LV_SYMBOL_WARNING   " DEAUTH TEST",   &style_btn_red,   0xFF4444, cb_start_deauth, y); y += 42;
-  btn_beacon = make_atk_btn(tab_audit, LV_SYMBOL_AUDIO     " BEACON FLOOD",  &style_btn_orange, 0xFFAA00, cb_start_beacon, y); y += 42;
-  btn_pmkid = make_atk_btn(tab_audit, LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE", &style_btn_blue,  0x00AAFF, cb_start_pmkid, y);
+  btn_reconnect = make_action_btn(tab_audit, LV_SYMBOL_WARNING   " RECONNECT TEST", &style_btn_red,   0xFF4444, cb_start_reconnect_test, y); y += 42;
+  btn_beacon = make_action_btn(tab_audit, LV_SYMBOL_AUDIO     " BEACON LOAD",  &style_btn_orange, 0xFFAA00, cb_start_beacon, y); y += 42;
+  btn_pmkid = make_action_btn(tab_audit, LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE", &style_btn_blue,  0x00AAFF, cb_start_pmkid, y);
   btn_stop_audit = lv_btn_create(tab_audit);
   lv_obj_set_size(btn_stop_audit, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); 
   lv_obj_align(btn_stop_audit, LV_ALIGN_BOTTOM_MID, 0, -52);
   lv_obj_set_style_bg_color(btn_stop_audit, lv_color_hex(0x1A0000), 0);
   lv_obj_set_style_border_color(btn_stop_audit, lv_color_hex(0xFF0000), 0);
   lv_obj_set_style_border_width(btn_stop_audit, 2, 0);
-  lv_obj_add_event_cb(btn_stop_audit, cb_stop_pentest, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(btn_stop_audit, cb_stop_audit_action, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *sl2=lv_label_create(btn_stop_audit); lv_label_set_text(sl2,LV_SYMBOL_STOP " STOP");
   lv_obj_set_style_text_color(sl2, lv_color_hex(UI::Colors::Error), 0); lv_obj_center(sl2);
   lv_obj_add_flag(btn_stop_audit,LV_OBJ_FLAG_HIDDEN);
@@ -348,18 +347,18 @@ void ui_build() {
   lv_obj_align(lbl_ble_status,LV_ALIGN_TOP_LEFT,5,5);
   lv_obj_set_width(lbl_ble_status, SCREEN_W - (UI::Layout::Margin * 2));
   lv_label_set_long_mode(lbl_ble_status,LV_LABEL_LONG_WRAP);
-  btn_ble_sniff=lv_btn_create(tab_ble); 
-  lv_obj_set_size(btn_ble_sniff, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(btn_ble_sniff,LV_ALIGN_BOTTOM_MID,0,-96);
-  lv_obj_add_style(btn_ble_sniff,&style_btn_dark,0);
-  lv_obj_add_event_cb(btn_ble_sniff,cb_toggle_ble_sniff,LV_EVENT_CLICKED,nullptr);
-  lv_obj_t *ls=lv_label_create(btn_ble_sniff); lv_label_set_text(ls,"START BLE SNIFF"); lv_obj_center(ls);
-  btn_ble_flood=lv_btn_create(tab_ble); 
-  lv_obj_set_size(btn_ble_flood, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(btn_ble_flood,LV_ALIGN_BOTTOM_MID,0,-50);
-  lv_obj_add_style(btn_ble_flood,&style_btn_red,0);
-  lv_obj_add_event_cb(btn_ble_flood,cb_toggle_ble_flood,LV_EVENT_CLICKED,nullptr);
-  lv_obj_t *lsp=lv_label_create(btn_ble_flood); lv_label_set_text(lsp,"START BLE FLOOD"); lv_obj_center(lsp);
+  btn_ble_scan=lv_btn_create(tab_ble); 
+  lv_obj_set_size(btn_ble_scan, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
+  lv_obj_align(btn_ble_scan,LV_ALIGN_BOTTOM_MID,0,-96);
+  lv_obj_add_style(btn_ble_scan,&style_btn_dark,0);
+  lv_obj_add_event_cb(btn_ble_scan,cb_toggle_ble_scan,LV_EVENT_CLICKED,nullptr);
+  lv_obj_t *ls=lv_label_create(btn_ble_scan); lv_label_set_text(ls,"START BLE SCAN"); lv_obj_center(ls);
+  btn_ble_adv_test=lv_btn_create(tab_ble); 
+  lv_obj_set_size(btn_ble_adv_test, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
+  lv_obj_align(btn_ble_adv_test,LV_ALIGN_BOTTOM_MID,0,-50);
+  lv_obj_add_style(btn_ble_adv_test,&style_btn_red,0);
+  lv_obj_add_event_cb(btn_ble_adv_test,cb_toggle_ble_adv_test,LV_EVENT_CLICKED,nullptr);
+  lv_obj_t *lsp=lv_label_create(btn_ble_adv_test); lv_label_set_text(lsp,"START BLE ADV TEST"); lv_obj_center(lsp);
   add_return_btn(tab_ble);
 
   // ── PCAP Tab ──────────────────────────────────
@@ -386,17 +385,17 @@ void ui_build() {
     lv_obj_t *lb=lv_label_create(b); lv_label_set_text(lb,l); lv_obj_center(lb);
     return b;
   };
-  small_btn(ch_row,"-",[](lv_event_t*) { // Use g_app_context.sniffer.pcap_locked_ch
-    if (g_app_context.sniffer.pcap_locked_ch > 1) g_app_context.sniffer.pcap_locked_ch--;
-    char buf[8]; snprintf(buf,sizeof(buf),"CH %d",g_app_context.sniffer.pcap_locked_ch);
+  small_btn(ch_row,"-",[](lv_event_t*) { // Use g_app_context.capture.pcap_locked_ch
+    if (g_app_context.capture.pcap_locked_ch > 1) g_app_context.capture.pcap_locked_ch--;
+    char buf[8]; snprintf(buf,sizeof(buf),"CH %d",g_app_context.capture.pcap_locked_ch);
     lv_label_set_text(lbl_pcap_ch,buf);
   });
   lbl_pcap_ch=lv_label_create(ch_row);
   lv_label_set_text(lbl_pcap_ch,"CH 1"); // Initial value, will be updated by process_channel_hop
   lv_obj_set_style_text_color(lbl_pcap_ch,lv_color_hex(0xFFFF00),0);
   small_btn(ch_row,"+",[](lv_event_t*) {
-    if (g_app_context.sniffer.pcap_locked_ch < 13) g_app_context.sniffer.pcap_locked_ch++;
-    char buf[8]; snprintf(buf,sizeof(buf),"CH %d",g_app_context.sniffer.pcap_locked_ch);
+    if (g_app_context.capture.pcap_locked_ch < 13) g_app_context.capture.pcap_locked_ch++;
+    char buf[8]; snprintf(buf,sizeof(buf),"CH %d",g_app_context.capture.pcap_locked_ch);
     lv_label_set_text(lbl_pcap_ch,buf);
   });
   btn_pcap_lock=lv_btn_create(ch_row); lv_obj_set_size(btn_pcap_lock,68,30);
@@ -404,9 +403,9 @@ void ui_build() {
   lv_obj_set_style_border_color(btn_pcap_lock,lv_color_hex(0x00FF88),0);
   lv_obj_set_style_border_width(btn_pcap_lock,1,0);
   lv_obj_add_event_cb(btn_pcap_lock,[](lv_event_t*) {
-    g_app_context.sniffer.pcap_ch_locked = !g_app_context.sniffer.pcap_ch_locked;
+    g_app_context.capture.pcap_ch_locked = !g_app_context.capture.pcap_ch_locked;
     lv_obj_t *lb=lv_obj_get_child(btn_pcap_lock,0);
-    if (g_app_context.sniffer.pcap_ch_locked) {
+    if (g_app_context.capture.pcap_ch_locked) {
       lv_label_set_text(lb,"LOCKED");
       lv_obj_set_style_bg_color(btn_pcap_lock,lv_color_hex(0x2A1500),0);
       lv_obj_set_style_border_color(btn_pcap_lock,lv_color_hex(0xFF8800),0);
@@ -440,7 +439,7 @@ void ui_build() {
   lv_obj_align(btn_probe_start,LV_ALIGN_BOTTOM_MID,0,-44);
   lv_obj_add_style(btn_probe_start,&style_btn_dark,0);
   lv_obj_add_event_cb(btn_probe_start,cb_toggle_probes,LV_EVENT_CLICKED,nullptr);
-  lv_obj_t *lpr=lv_label_create(btn_probe_start); lv_label_set_text(lpr,"START PROBE SNIFF"); lv_obj_center(lpr);
+  lv_obj_t *lpr=lv_label_create(btn_probe_start); lv_label_set_text(lpr,"START PROBE MONITOR"); lv_obj_center(lpr);
   add_return_btn(tab_probes);
 
   // ── Settings Tab ──────────────────────────────
@@ -450,31 +449,31 @@ void ui_build() {
   const int settings_step = UI::Layout::ButtonHeight + settings_gap;
   const int settings_btn_w = SCREEN_W - (UI::Layout::Margin * 2);
 
-  lv_obj_t *btn_open_beacon_ssids = make_atk_btn(tab_settings, LV_SYMBOL_EDIT " BEACON SSIDs", &style_btn_dark, 0xAAAAAA, [](lv_event_t *e) {
+  lv_obj_t *btn_open_beacon_ssids = make_action_btn(tab_settings, LV_SYMBOL_EDIT " BEACON SSIDs", &style_btn_dark, 0xAAAAAA, [](lv_event_t *e) {
       navigate_to(9); 
   }, UI::Layout::Padding);
   lv_obj_clear_flag(btn_open_beacon_ssids, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_size(btn_open_beacon_ssids, settings_btn_w, UI::Layout::ButtonHeight);
 
-  lv_obj_t *btn_open_diag = make_atk_btn(tab_settings, LV_SYMBOL_SETTINGS " SYSTEM DIAGNOSTICS", &style_btn_dark, 0x00FFCC, [](lv_event_t *e) {
+  lv_obj_t *btn_open_diag = make_action_btn(tab_settings, LV_SYMBOL_SETTINGS " SYSTEM DIAGNOSTICS", &style_btn_dark, 0x00FFCC, [](lv_event_t *e) {
       navigate_to(10);
   }, UI::Layout::Padding + settings_step);
   lv_obj_clear_flag(btn_open_diag, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_diag,0), lv_color_hex(UI::Colors::Primary), 0);
   lv_obj_set_size(btn_open_diag, settings_btn_w, UI::Layout::ButtonHeight);
 
-  lv_obj_t *btn_open_sys_stats = make_atk_btn(tab_settings, LV_SYMBOL_LIST " PERFORMANCE STATS", &style_btn_dark, 0xFFAA00, [](lv_event_t *e) {
+  lv_obj_t *btn_open_sys_stats = make_action_btn(tab_settings, LV_SYMBOL_LIST " PERFORMANCE STATS", &style_btn_dark, 0xFFAA00, [](lv_event_t *e) {
       navigate_to(11);
   }, UI::Layout::Padding + settings_step * 2);
   lv_obj_clear_flag(btn_open_sys_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_sys_stats,0), lv_color_hex(UI::Colors::Warning), 0);
   lv_obj_set_size(btn_open_sys_stats, settings_btn_w, UI::Layout::ButtonHeight);
 
-  lv_obj_t *btn_open_batt_stats = make_atk_btn(tab_settings, LV_SYMBOL_BATTERY_3 " BATTERY STATS", &style_btn_dark, 0x00FF88, [](lv_event_t *e) {
+  lv_obj_t *btn_open_batt_stats = make_action_btn(tab_settings, LV_SYMBOL_BATTERY_3 " BATTERY STATS", &style_btn_dark, 0x00FF88, [](lv_event_t *e) {
       navigate_to(12);
   }, UI::Layout::Padding + settings_step * 3);
   lv_obj_clear_flag(btn_open_batt_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_batt_stats,0), lv_color_hex(UI::Colors::Success), 0);
   lv_obj_set_size(btn_open_batt_stats, settings_btn_w, UI::Layout::ButtonHeight);
 
-  lv_obj_t *btn_open_reboot = make_atk_btn(tab_settings, LV_SYMBOL_POWER " REBOOT", &style_btn_dark, 0xFF4444, [](lv_event_t *e) {
+  lv_obj_t *btn_open_reboot = make_action_btn(tab_settings, LV_SYMBOL_POWER " REBOOT", &style_btn_dark, 0xFF4444, [](lv_event_t *e) {
       navigate_to(13);
   }, UI::Layout::Padding + settings_step * 4);
   lv_obj_clear_flag(btn_open_reboot, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_reboot,0), lv_color_hex(UI::Colors::Error), 0);
@@ -822,7 +821,7 @@ void ui_build() {
   lv_textarea_set_one_line(ta_lora_input, true);
 
   extern void cb_send_lora(lv_event_t* e);
-  lv_obj_t *btn_lora_send = make_atk_btn(lora_log_panel, "SEND", &style_btn_blue, 0x00AAFF, cb_send_lora, 140);
+  lv_obj_t *btn_lora_send = make_action_btn(lora_log_panel, "SEND", &style_btn_blue, 0x00AAFF, cb_send_lora, 140);
   lv_obj_set_size(btn_lora_send, 70, 40);
   lv_obj_align(btn_lora_send, LV_ALIGN_TOP_RIGHT, -5, 140);
   lv_obj_clear_flag(btn_lora_send, LV_OBJ_FLAG_HIDDEN);
@@ -889,7 +888,7 @@ void ui_build() {
   lv_textarea_set_one_line(ta_lora_chat_input, true);
 
   extern void cb_send_lora_chat(lv_event_t* e);
-  lv_obj_t *btn_lora_chat_send = make_atk_btn(lora_chat_panel, "SEND", &style_btn_blue, 0x00FF88, cb_send_lora_chat, 140);
+  lv_obj_t *btn_lora_chat_send = make_action_btn(lora_chat_panel, "SEND", &style_btn_blue, 0x00FF88, cb_send_lora_chat, 140);
   lv_obj_set_size(btn_lora_chat_send, 70, 40);
   lv_obj_align(btn_lora_chat_send, LV_ALIGN_TOP_RIGHT, -5, 140);
   lv_obj_clear_flag(btn_lora_chat_send, LV_OBJ_FLAG_HIDDEN);

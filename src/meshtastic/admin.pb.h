@@ -378,7 +378,7 @@ typedef struct _meshtastic_AdminMessage {
     };
     /* The node generates this key and sends it with any get_x_response packets.
  The client MUST include the same key with any set_x commands. Key expires after 300 seconds.
- Prevents replay attacks for admin messages. */
+ Prevents replay of admin messages. */
     meshtastic_AdminMessage_session_passkey_t session_passkey;
 } meshtastic_AdminMessage;
 

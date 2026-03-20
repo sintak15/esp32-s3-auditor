@@ -9,8 +9,8 @@ void start_pcap(AppContext* context);
 void stop_pcap(AppContext* context);
 void process_pcap_queue(AppContext* context);
 
-void start_probe_sniffer(AppContext* context);
-void stop_probe_sniffer(AppContext* context);
+void start_probe_monitor(AppContext* context);
+void stop_probe_monitor(AppContext* context);
 void process_probe_queue(AppContext* context);
 
 void process_channel_hop(AppContext* context);

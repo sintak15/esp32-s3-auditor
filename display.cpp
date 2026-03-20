@@ -504,8 +504,8 @@ void ui_update_tick(lv_timer_t *timer) {
             char c0[96], c1[96];
             get_last_crash_states(c0, c1, sizeof(c0));
             
-            uint32_t pcap_q = ui_context->sniffer.pcap_queue ? uxQueueMessagesWaiting(ui_context->sniffer.pcap_queue) : 0;
-            uint32_t probe_q = ui_context->sniffer.probe_queue ? uxQueueMessagesWaiting(ui_context->sniffer.probe_queue) : 0;
+            uint32_t pcap_q = ui_context->capture.pcap_queue ? uxQueueMessagesWaiting(ui_context->capture.pcap_queue) : 0;
+            uint32_t probe_q = ui_context->capture.probe_queue ? uxQueueMessagesWaiting(ui_context->capture.probe_queue) : 0;
             
             UBaseType_t main_stack = ui_context->main_task_handle ? uxTaskGetStackHighWaterMark(ui_context->main_task_handle) : 0;
             UBaseType_t wifi_stack = ui_context->wifi_task_handle ? uxTaskGetStackHighWaterMark(ui_context->wifi_task_handle) : 0;
@@ -530,14 +530,14 @@ void ui_update_tick(lv_timer_t *timer) {
                 "Core 1: %s\n\n"
                 "--- STATUS ---\n"
                 "Degraded: %s\n"
-                "BLE Sniff: %d Flood: %d\n"
+                "BLE Scan: %d Adv Test: %d\n"
                 "WiFi Scan: %d",
                 ESP.getFreeHeap(), ESP.getMinFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), ESP.getFreePsram(),
                 pcap_q, probe_q,
                 (unsigned long)main_stack, (unsigned long)wifi_stack, (unsigned long)ui_stack, (unsigned long)lora_stack,
                 c0, c1,
                 is_emergency_heap() ? "YES" : "NO",
-                ui_context->ble.sniff_active, ui_context->ble.flood_active,
+                ui_context->ble.scan_active, ui_context->ble.adv_test_active,
                 ui_context->wifi_scan.started && !ui_context->wifi_scan.paused);
             
             lv_textarea_set_text(ta_diagnostics, buf);
@@ -611,8 +611,8 @@ void ui_update_tick(lv_timer_t *timer) {
 
     // Activity Spinner
     if (ui_spinner) {
-        bool is_active = (ui_context->sniffer.pcap_active || ui_context->sniffer.probe_active || 
-                          ui_context->ble.sniff_active || ui_context->ble.flood_active || 
+        bool is_active = (ui_context->capture.pcap_active || ui_context->capture.probe_active || 
+                          ui_context->ble.scan_active || ui_context->ble.adv_test_active || 
                           ui_context->audit.current_mode != AUDIT_NONE);
         static int last_is_active = -1;
         if ((int)is_active != last_is_active) {

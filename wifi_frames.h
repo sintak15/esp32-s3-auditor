@@ -30,7 +30,7 @@ struct __attribute__((packed)) ProbeReqBody {
     char    ssid[0];    // Flexible array member for SSID
 };
 
-// EAPOL-Key frame structure for PMKID sniffing
+// EAPOL-Key frame structure for PMKID monitoring
 // This is a simplified view focusing on the Key Information field
 // and finding the Vendor Specific IE for PMKID.
 struct __attribute__((packed)) EapolKeyFrame {

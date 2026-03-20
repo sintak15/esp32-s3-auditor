@@ -10,18 +10,18 @@
 #include <esp_bt.h>
 #include "ui_events.h"
 
-extern lv_obj_t *lbl_ble_status, *btn_ble_flood, *btn_ble_sniff;
+extern lv_obj_t *lbl_ble_status, *btn_ble_adv_test, *btn_ble_scan;
 
 static AppContext* ble_context = nullptr;
-static BLESniffCB* ble_sniffer_cb_instance = nullptr;
+static BLEScanCB* ble_scan_cb_instance = nullptr;
 static SemaphoreHandle_t ble_mutex = nullptr;
 extern volatile bool req_stop_ble; // Allow memory bailouts to trigger UI cleanup
 
 // Worker Task Queue definitions
 enum BleCmdType {
     BLE_CMD_NONE,
-    BLE_CMD_START_SNIFF,
-    BLE_CMD_START_FLOOD,
+    BLE_CMD_START_SCAN,
+    BLE_CMD_START_ADV_TEST,
     BLE_CMD_STOP
 };
 struct BleCmd {
@@ -72,10 +72,10 @@ static bool ble_low_mem() {
 }
 
 static void diag_ble_state(const char* where, AppContext* context) {
-    Serial.printf("[BLE] %s sniff=%d flood=%d busy=%d ready=%d scanner=%p adv=%p heap=%u\n",
+    Serial.printf("[BLE] %s scan=%d advTest=%d busy=%d ready=%d scanner=%p adv=%p heap=%u\n",
                   where,
-                  context->ble.sniff_active,
-                  context->ble.flood_active,
+                  context->ble.scan_active,
+                  context->ble.adv_test_active,
                   context->ble.busy,
                   context->ble.nimble_ready,
                   context->ble.scanner,
@@ -84,9 +84,9 @@ static void diag_ble_state(const char* where, AppContext* context) {
 }
 
 // Implementation of the callback class
-BLESniffCB::BLESniffCB(AppContext* context) : app_context(context) {}
+BLEScanCB::BLEScanCB(AppContext* context) : app_context(context) {}
 
-void BLESniffCB::onResult(const NimBLEAdvertisedDevice *dev) {
+void BLEScanCB::onResult(const NimBLEAdvertisedDevice *dev) {
     if (!app_context || !dev) return;
     BleState& ble = app_context->ble;
 
@@ -119,8 +119,8 @@ static void internal_stop_ble(AppContext* context) {
     diag_ble_state("internal_stop_ble:enter", context);
     context->ble.busy = true;
 
-    if (context->ble.sniff_active) {
-        context->ble.sniff_active = false;
+    if (context->ble.scan_active) {
+        context->ble.scan_active = false;
         if (context->ble.scanner) {
             context->ble.scanner->setScanCallbacks(nullptr);
             context->ble.scanner->stop();
@@ -128,8 +128,8 @@ static void internal_stop_ble(AppContext* context) {
         }
     }
 
-    if (context->ble.flood_active) {
-        context->ble.flood_active = false;
+    if (context->ble.adv_test_active) {
+        context->ble.adv_test_active = false;
         // Stop advertising safely before deinit
         NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
         if (adv) adv->stop();
@@ -139,22 +139,22 @@ static void internal_stop_ble(AppContext* context) {
     diag_ble_state("internal_stop_ble:exit", context);
 }
 
-static void internal_start_ble_sniff(AppContext* context) {
-    diag_ble_state("internal_start_ble_sniff:enter", context);
+static void internal_start_ble_scan(AppContext* context) {
+    diag_ble_state("internal_start_ble_scan:enter", context);
     
-    Serial.printf("[BLE] start request: scanner=%p adv=%p cb=%p heap=%u sniff=%d flood=%d busy=%d ready=%d\n",
+    Serial.printf("[BLE] start request: scanner=%p adv=%p cb=%p heap=%u scan=%d advTest=%d busy=%d ready=%d\n",
                   (void*)context->ble.scanner,
                   (void*)NimBLEDevice::getAdvertising(),
-                  (void*)ble_sniffer_cb_instance,
+                  (void*)ble_scan_cb_instance,
                   ESP.getFreeHeap(),
-                  context->ble.sniff_active,
-                  context->ble.flood_active,
+                  context->ble.scan_active,
+                  context->ble.adv_test_active,
                   context->ble.busy,
                   context->ble.nimble_ready);
                   
     context->ble.busy = true;
 
-    if (context->ble.flood_active) internal_stop_ble(context);
+    if (context->ble.adv_test_active) internal_stop_ble(context);
 
     if (!ensure_ble_host_ready()) {
         Serial.println("[BLE] host not ready");
@@ -182,8 +182,8 @@ static void internal_start_ble_sniff(AppContext* context) {
     scanner->stop();
     scanner->clearResults();
 
-    if (ble_sniffer_cb_instance) {
-        scanner->setScanCallbacks(ble_sniffer_cb_instance, true);
+    if (ble_scan_cb_instance) {
+        scanner->setScanCallbacks(ble_scan_cb_instance, true);
     }
     scanner->setActiveScan(false); // Reduce memory & CPU load
     scanner->setInterval(400);     // Soften scan duty
@@ -195,7 +195,7 @@ static void internal_start_ble_sniff(AppContext* context) {
         xSemaphoreGive(ble_mutex);
     }
     context->ble.packet_count = 0;
-    context->ble.sniff_active = true;
+    context->ble.scan_active = true;
     context->ble.busy = false;
 
     // FIX 7: Add heap debug
@@ -203,14 +203,14 @@ static void internal_start_ble_sniff(AppContext* context) {
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
 
-    diag_ble_state("internal_start_ble_sniff:exit", context);
+    diag_ble_state("internal_start_ble_scan:exit", context);
 }
 
-static void internal_start_ble_flood(AppContext* context) {
-    diag_ble_state("internal_start_ble_flood:enter", context);
+static void internal_start_ble_adv_test(AppContext* context) {
+    diag_ble_state("internal_start_ble_adv_test:enter", context);
     context->ble.busy = true;
 
-    if (context->ble.sniff_active) internal_stop_ble(context);
+    if (context->ble.scan_active) internal_stop_ble(context);
 
     context->wifi_scan.paused = true;
     esp_wifi_set_promiscuous(false);
@@ -226,7 +226,7 @@ static void internal_start_ble_flood(AppContext* context) {
         return;
     }
 
-    context->ble.flood_active = true;
+    context->ble.adv_test_active = true;
     context->ble.busy = false;
     
     // FIX 7: Add heap debug
@@ -234,14 +234,14 @@ static void internal_start_ble_flood(AppContext* context) {
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
 
-    diag_ble_state("internal_start_ble_flood:exit", context);
+    diag_ble_state("internal_start_ble_adv_test:exit", context);
 }
 
-static void internal_process_ble_flood(AppContext* context) {
-    if (!context->ble.flood_active || context->ble.busy) return;
+static void internal_process_ble_adv_test(AppContext* context) {
+    if (!context->ble.adv_test_active || context->ble.busy) return;
     
     if (ble_low_mem()) {
-        Serial.println("[BLE] stopping flood: low memory");
+        Serial.println("[BLE] stopping adv test: low memory");
         req_stop_ble = true; // Signal main loop to push UI teardown safely
         return;
     }
@@ -292,16 +292,16 @@ static void ble_worker_task(void* arg) {
         // Rapid response command polling
         if (xQueueReceive(ble_cmd_q, &cmd, pdMS_TO_TICKS(10)) == pdTRUE) {
             switch (cmd.type) {
-                case BLE_CMD_START_SNIFF: internal_start_ble_sniff(context); break;
-                case BLE_CMD_START_FLOOD: internal_start_ble_flood(context); break;
+                case BLE_CMD_START_SCAN:     internal_start_ble_scan(context); break;
+                case BLE_CMD_START_ADV_TEST: internal_start_ble_adv_test(context); break;
                 case BLE_CMD_STOP:        internal_stop_ble(context); break;
                 default: break;
             }
         }
 
-        // Background periodic flooding runs completely independent of UI
-        if (context->ble.flood_active && !context->ble.busy) {
-            internal_process_ble_flood(context);
+        // Background periodic advertising test runs independent of UI
+        if (context->ble.adv_test_active && !context->ble.busy) {
+            internal_process_ble_adv_test(context);
         }
     }
 }
@@ -310,7 +310,7 @@ static void ble_worker_task(void* arg) {
 
 void ble_tasks_init(AppContext* context) {
     ble_context = context;
-    ble_sniffer_cb_instance = new BLESniffCB(context);
+    ble_scan_cb_instance = new BLEScanCB(context);
     ble_mutex = xSemaphoreCreateMutex();
     
     ble_cmd_q = xQueueCreate(10, sizeof(BleCmd));
@@ -319,17 +319,17 @@ void ble_tasks_init(AppContext* context) {
 }
 
 void stop_ble(AppContext* context) {
-    if (!context->ble.sniff_active && !context->ble.flood_active) return;
+    if (!context->ble.scan_active && !context->ble.adv_test_active) return;
     
     BleCmd cmd = {BLE_CMD_STOP};
     xQueueSend(ble_cmd_q, &cmd, 0);
 
-    queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "START BLE SNIFF");
-    queue_local_ui_text(UI_EVT_SET_BLE_FLOOD_BUTTON, "START BLE FLOOD");
+    queue_local_ui_text(UI_EVT_SET_BLE_SCAN_BUTTON, "START BLE SCAN");
+    queue_local_ui_text(UI_EVT_SET_BLE_ADV_TEST_BUTTON, "START BLE ADV TEST");
     queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#00FFCC BLE READY#\n\nSelect an action.");
 }
 
-void start_ble_sniff(AppContext* context) {
+void start_ble_scan(AppContext* context) {
     if (!ble_switch_allowed()) {
         Serial.println("[BLE] switch blocked (cooldown)");
         return;
@@ -337,25 +337,25 @@ void start_ble_sniff(AppContext* context) {
 
     if (context->ble.busy) return;
     
-    if (context->ble.flood_active) {
-        Serial.println("[BLE] refusing sniff while flood is active");
-        queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "START BLE SNIFF");
-        queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 ERROR#\n\nStop flooding first.");
+    if (context->ble.adv_test_active) {
+        Serial.println("[BLE] refusing scan while adv test is active");
+        queue_local_ui_text(UI_EVT_SET_BLE_SCAN_BUTTON, "START BLE SCAN");
+        queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 ERROR#\n\nStop the adv test first.");
         return;
     }
     
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 60000) {
         Serial.println("[BLE] start denied: low internal heap");
-        queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "START BLE SNIFF");
+        queue_local_ui_text(UI_EVT_SET_BLE_SCAN_BUTTON, "START BLE SCAN");
         queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
         return;
     }
 
-    BleCmd cmd = {BLE_CMD_START_SNIFF};
+    BleCmd cmd = {BLE_CMD_START_SCAN};
     xQueueSend(ble_cmd_q, &cmd, 0);
 }
 
-void start_ble_flood(AppContext* context) {
+void start_ble_adv_test(AppContext* context) {
     if (!ble_switch_allowed()) {
         Serial.println("[BLE] switch blocked (cooldown)");
         return;
@@ -363,29 +363,29 @@ void start_ble_flood(AppContext* context) {
 
     if (context->ble.busy) return;
     
-    if (context->ble.sniff_active) {
-        Serial.println("[BLE] refusing flood while sniff is active");
-        queue_local_ui_text(UI_EVT_SET_BLE_FLOOD_BUTTON, "START BLE FLOOD");
-        queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 ERROR#\n\nStop sniffing first.");
+    if (context->ble.scan_active) {
+        Serial.println("[BLE] refusing adv test while scan is active");
+        queue_local_ui_text(UI_EVT_SET_BLE_ADV_TEST_BUTTON, "START BLE ADV TEST");
+        queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 ERROR#\n\nStop the scan first.");
         return;
     }
     
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 60000) {
         Serial.println("[BLE] start denied: low internal heap");
-        queue_local_ui_text(UI_EVT_SET_BLE_FLOOD_BUTTON, "START BLE FLOOD");
+        queue_local_ui_text(UI_EVT_SET_BLE_ADV_TEST_BUTTON, "START BLE ADV TEST");
         queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 LOW MEMORY#\n\nCannot start BLE.");
         return;
     }
 
-    BleCmd cmd = {BLE_CMD_START_FLOOD};
+    BleCmd cmd = {BLE_CMD_START_ADV_TEST};
     xQueueSend(ble_cmd_q, &cmd, 0);
 }
 
-void process_ble_sniff_ui(AppContext* context) {
-    if (!context->ble.sniff_active) return;
+void process_ble_scan_ui(AppContext* context) {
+    if (!context->ble.scan_active) return;
     
     if (ble_low_mem()) {
-        Serial.println("[BLE] stopping sniff: low memory");
+        Serial.println("[BLE] stopping scan: low memory");
         stop_ble(context);
         return;
     }
@@ -401,7 +401,7 @@ void process_ble_sniff_ui(AppContext* context) {
             uint8_t i = ble.ring_tail;
             strncpy(ble.last_mac, ble.ring_buf[i].mac, 17);
             ble.last_mac[17] = '\0';
-            if (sd_card_ready()) sd_log_ble_sniff(millis(), ble.ring_buf[i].mac, ble.ring_buf[i].rssi);
+            if (sd_card_ready()) sd_log_ble_scan(millis(), ble.ring_buf[i].mac, ble.ring_buf[i].rssi);
             ble.ring_tail = (ble.ring_tail + 1) % BLE_RING_SIZE;
             processed++;
         }
@@ -413,7 +413,7 @@ void process_ble_sniff_ui(AppContext* context) {
     static uint32_t last_ui = 0;
     if (millis() - last_ui < 1000) return;
     char buf[128];
-    snprintf(buf, sizeof(buf), "#00FFCC BLE SNIFFER#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
+    snprintf(buf, sizeof(buf), "#00FFCC BLE SCAN#\n\nPackets: %lu\nUnique: %lu\nLast: %s",
              pkt_count, unique_size, ble.last_mac);
     queue_local_ui_text(UI_EVT_SET_BLE_STATUS, buf);
     last_ui = millis();

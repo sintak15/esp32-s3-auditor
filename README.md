@@ -7,9 +7,9 @@ This project is intended for educational use and authorized testing only. You ar
 
 ## Features (high level)
 - WiFi scan (AP / STA / Linked)
-- Audit actions (deauth, beacon flood, PMKID capture)
-- PCAP capture + probe request sniffing to SD
-- BLE sniffing + flood testing
+- Audit actions (reconnect test, beacon load test, PMKID capture)
+- PCAP capture + probe request monitoring to SD
+- BLE scanning + advertisement test
 - Meshtastic (LoRa) serial UI (terminal/chat/stats/nodedb)
 
 ## Arduino IDE setup
@@ -50,4 +50,3 @@ See `workflows.md` for suggested operational workflows.
 - Boot loops: usually PSRAM config mismatch (ensure OPI PSRAM).
 - SD failures: format FAT32 and verify wiring/pin config.
 - LoRa/Meshtastic: requires an external Meshtastic node connected over UART and configured for serial.
-

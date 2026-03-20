@@ -34,7 +34,7 @@
 #include "display.h"
 #include "sd_logger.h"
 #include "wifi_scanner.h"
-#include "pentest_attacks.h"
+#include "audit_actions.h"
 #include "ble_tasks.h"
 #include "pcap_and_probes.h"
 #include "ui_events.h"
@@ -53,8 +53,8 @@ UiEventQueue ui_queue;
 extern lv_obj_t *probe_list;
 extern lv_obj_t *lbl_ble_status;
 extern lv_obj_t *lbl_pcap_status;
-extern lv_obj_t *btn_ble_flood;
-extern lv_obj_t *btn_ble_sniff;
+extern lv_obj_t *btn_ble_adv_test;
+extern lv_obj_t *btn_ble_scan;
 extern lv_obj_t *btn_pcap_start;
 extern lv_obj_t *btn_probe_start;
 extern lv_obj_t *lbl_scan_pause;
@@ -297,15 +297,15 @@ void process_ui_queue() {
                     if (child) lv_label_set_text(child, lev.text);
                 }
                 break;
-            case UI_EVT_SET_BLE_FLOOD_BUTTON:
-                if (btn_ble_flood) {
-                    lv_obj_t *child = lv_obj_get_child(btn_ble_flood, 0);
+            case UI_EVT_SET_BLE_ADV_TEST_BUTTON:
+                if (btn_ble_adv_test) {
+                    lv_obj_t *child = lv_obj_get_child(btn_ble_adv_test, 0);
                     if (child) lv_label_set_text(child, lev.text);
                 }
                 break;
-            case UI_EVT_SET_BLE_SNIFF_BUTTON:
-                if (btn_ble_sniff) {
-                    lv_obj_t *child = lv_obj_get_child(btn_ble_sniff, 0);
+            case UI_EVT_SET_BLE_SCAN_BUTTON:
+                if (btn_ble_scan) {
+                    lv_obj_t *child = lv_obj_get_child(btn_ble_scan, 0);
                     if (child) lv_label_set_text(child, lev.text);
                 }
                 break;
@@ -463,10 +463,10 @@ void status_service_task(void *pv) {
         bool charging = (mv > 4130);
 
         if (!sd_card_ready() && millis() - sd_retry_ms > 5000) {
-            if (!g_app_context.sniffer.pcap_active && 
-                !g_app_context.sniffer.probe_active && 
+            if (!g_app_context.capture.pcap_active && 
+                !g_app_context.capture.probe_active && 
                 g_app_context.audit.current_mode == AUDIT_NONE && 
-                !g_app_context.ble.sniff_active) {
+                !g_app_context.ble.scan_active) {
                 sd_retry_ms = millis();
                 sd_reinit();
             }
@@ -798,9 +798,9 @@ void lora_service_task(void *pv) {
 
 static volatile bool pending_stop_all = false;
 static volatile int pending_nav_tab = -1;
-static volatile bool req_start_ble_flood = false;
+static volatile bool req_start_ble_adv_test = false;
 volatile bool req_stop_ble = false; // Make globally accessible to BLE background thread
-static volatile bool req_start_ble_sniff = false;
+static volatile bool req_start_ble_scan = false;
 static volatile bool req_start_pcap = false;
 static volatile bool req_stop_pcap = false;
 static volatile bool req_start_probe = false;
@@ -826,16 +826,16 @@ void cb_net_selected(lv_event_t *e) {
     if (idx < 0 || idx >= g_app_context.wifi_scan.ap_count || !g_app_context.wifi_scan.ap_list[idx].active) return;
     
     g_app_context.wifi_scan.selected_net = idx;
-    g_app_context.wifi_scan.deauth_sta_target = -1;
+    g_app_context.wifi_scan.reconnect_sta_target = -1;
     
     char bss[18]; // Corrected to use g_app_context
     sprintf(bss, "%02X:%02X:%02X:%02X:%02X:%02X", g_app_context.wifi_scan.ap_list[idx].bssid[0], g_app_context.wifi_scan.ap_list[idx].bssid[1], g_app_context.wifi_scan.ap_list[idx].bssid[2], g_app_context.wifi_scan.ap_list[idx].bssid[3], g_app_context.wifi_scan.ap_list[idx].bssid[4], g_app_context.wifi_scan.ap_list[idx].bssid[5]);
 
-    lv_label_set_text_fmt(lbl_audit_target, "#00FFCC TARGET:#  %s", g_app_context.wifi_scan.ap_list[idx].ssid);
+    lv_label_set_text_fmt(lbl_audit_target, "#00FFCC SELECTED:#  %s", g_app_context.wifi_scan.ap_list[idx].ssid);
     lv_label_set_text_fmt(lbl_audit_bssid, "BSSID: %s  CH:%d", bss, g_app_context.wifi_scan.ap_list[idx].channel);
-    lv_label_set_text(lbl_audit_status, "#444444 IDLE - choose audit task#");
+    lv_label_set_text(lbl_audit_status, "#444444 IDLE - choose an audit action#");
     
-    lv_obj_clear_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
@@ -886,38 +886,38 @@ void cb_view_linked(lv_event_t*) {
     render_scan_list(&g_app_context);
 }
 
-void cb_start_deauth(lv_event_t*) {
-    // Corrected access to selected_net and deauth_sta_target
-    if (g_app_context.wifi_scan.selected_net < 0 && g_app_context.wifi_scan.deauth_sta_target < 0) return;
-    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_pentest(&g_app_context);
+void cb_start_reconnect_test(lv_event_t*) {
+    // Corrected access to selected_net and reconnect_sta_target
+    if (g_app_context.wifi_scan.selected_net < 0 && g_app_context.wifi_scan.reconnect_sta_target < 0) return;
+    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_audit_action(&g_app_context);
     
     if (g_app_context.wifi_scan.selected_net >= 0) { // Corrected access
         set_promiscuous_channel(g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].channel); // Corrected access
     }
-    g_app_context.audit.current_mode = AUDIT_DEAUTH;
-    g_app_context.audit.audit_timer = lv_timer_create(deauth_tick, 50, &g_app_context);
+    g_app_context.audit.current_mode = AUDIT_RECONNECT;
+    g_app_context.audit.audit_timer = lv_timer_create(reconnect_tick, 50, &g_app_context);
     
-    if (g_app_context.wifi_scan.deauth_sta_target >= 0 && g_app_context.wifi_scan.deauth_sta_target < g_app_context.wifi_scan.sta_count) { // Corrected access
+    if (g_app_context.wifi_scan.reconnect_sta_target >= 0 && g_app_context.wifi_scan.reconnect_sta_target < g_app_context.wifi_scan.sta_count) { // Corrected access
         char sm[18];
-        mac_str(g_app_context.wifi_scan.sta_list[g_app_context.wifi_scan.deauth_sta_target].mac, sm);
-        lv_label_set_text_fmt(lbl_audit_status, "#FF4444 DEAUTH ACTIVE#\nTarget: %s", sm);
+        mac_str(g_app_context.wifi_scan.sta_list[g_app_context.wifi_scan.reconnect_sta_target].mac, sm);
+        lv_label_set_text_fmt(lbl_audit_status, "#FF4444 RECONNECT TEST ACTIVE#\nClient: %s", sm);
     } else {
-        lv_label_set_text_fmt(lbl_audit_status, "#FF4444 DEAUTH ACTIVE#\nBroadcast: %.16s", g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].ssid);
+        lv_label_set_text_fmt(lbl_audit_status, "#FF4444 RECONNECT TEST ACTIVE#\nNetwork: %.16s", g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].ssid);
     }
-    lv_obj_add_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
 
 void cb_start_beacon(lv_event_t*) {
-    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_pentest(&g_app_context);
+    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_audit_action(&g_app_context);
     set_promiscuous_channel(1);
     g_app_context.audit.current_mode = AUDIT_BEACON;
     g_app_context.audit.beacon_idx = 0;
     g_app_context.audit.audit_timer = lv_timer_create(beacon_tick, 100, &g_app_context);
-    lv_label_set_text(lbl_audit_status, "#FFAA00 BEACON FLOOD ACTIVE#");
-    lv_obj_add_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(lbl_audit_status, "#FFAA00 BEACON LOAD ACTIVE#");
+    lv_obj_add_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
@@ -925,11 +925,11 @@ void cb_start_beacon(lv_event_t*) {
 
 void cb_start_pmkid(lv_event_t*) {
     if (g_app_context.wifi_scan.selected_net < 0) return; // Corrected access
-    if (g_app_context.sniffer.pcap_active || g_app_context.sniffer.probe_active) {
+    if (g_app_context.capture.pcap_active || g_app_context.capture.probe_active) {
         lv_label_set_text(lbl_audit_status, "#FF4444 Stop PCAP/Probes first#");
         return;
     }
-    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_pentest(&g_app_context);
+    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_audit_action(&g_app_context);
 
     // Pause scan and stop promiscuous before swapping callbacks
     g_app_context.wifi_scan.paused = true;
@@ -962,43 +962,43 @@ void cb_start_pmkid(lv_event_t*) {
     g_app_context.audit.pmkid_target_ssid[sizeof(g_app_context.audit.pmkid_target_ssid) - 1] = '\0';
 
     set_promiscuous_channel(target_channel);
-    esp_wifi_set_promiscuous_rx_cb(pmkid_sniffer_cb);
+    esp_wifi_set_promiscuous_rx_cb(pmkid_monitor_cb);
     g_app_context.audit.current_mode = AUDIT_PMKID;
     g_app_context.audit.audit_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
     esp_wifi_set_promiscuous(true);
-    lv_label_set_text(lbl_audit_status, "#00AAFF PMKID SNIFFING...#\nWaiting for handshake");
-    lv_obj_add_flag(btn_deauth, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(lbl_audit_status, "#00AAFF PMKID MONITORING...#\nWaiting for handshake");
+    lv_obj_add_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
 
-void cb_stop_pentest(lv_event_t*) { stop_pentest(&g_app_context); }
+void cb_stop_audit_action(lv_event_t*) { stop_audit_action(&g_app_context); }
 
-void cb_toggle_ble_flood(lv_event_t* e) {
+void cb_toggle_ble_adv_test(lv_event_t* e) {
     if (g_app_context.ble.busy) return;
     lv_obj_t *target = lv_event_get_current_target(e);
     if (!target) return;
     lv_obj_t *lbl = lv_obj_get_child(target, 0);
     if (!lbl) return;
-    if (!g_app_context.ble.flood_active) {
+    if (!g_app_context.ble.adv_test_active) {
         lv_label_set_text(lbl, "STARTING...");
-        req_start_ble_flood = true;
+        req_start_ble_adv_test = true;
     } else {
         lv_label_set_text(lbl, "STOPPING...");
         req_stop_ble = true;
     }
 }
 
-void cb_toggle_ble_sniff(lv_event_t* e) {
+void cb_toggle_ble_scan(lv_event_t* e) {
     if (g_app_context.ble.busy) return;
     lv_obj_t *target = lv_event_get_current_target(e);
     if (!target) return;
     lv_obj_t *lbl = lv_obj_get_child(target, 0);
     if (!lbl) return;
-    if (!g_app_context.ble.sniff_active) {
+    if (!g_app_context.ble.scan_active) {
         lv_label_set_text(lbl, "STARTING...");
-        req_start_ble_sniff = true;
+        req_start_ble_scan = true;
     } else {
         lv_label_set_text(lbl, "STOPPING...");
         req_stop_ble = true;
@@ -1010,7 +1010,7 @@ void cb_toggle_pcap(lv_event_t* e) {
     if (!target) return;
     lv_obj_t *lbl = lv_obj_get_child(target, 0);
     if (!lbl) return;
-    if (!g_app_context.sniffer.pcap_active) {
+    if (!g_app_context.capture.pcap_active) {
         if (!sd_card_ready()) { 
             if (lbl_pcap_status) lv_label_set_text(lbl_pcap_status, "#FF4444 NO SD CARD#"); 
             return; 
@@ -1028,7 +1028,7 @@ void cb_toggle_probes(lv_event_t* e) {
     if (!target) return;
     lv_obj_t *lbl = lv_obj_get_child(target, 0);
     if (!lbl) return;
-    if (!g_app_context.sniffer.probe_active) {
+    if (!g_app_context.capture.probe_active) {
         lv_label_set_text(lbl, "STARTING...");
         req_start_probe = true;
     } else {
@@ -1201,9 +1201,9 @@ void check_emergency_heap() {
             Serial.printf("[EMERGENCY] Heap critically low (%u) - stopping all tasks\n", heap);
             
             stop_ble(&g_app_context);
-            stop_pentest(&g_app_context);
+            stop_audit_action(&g_app_context);
             stop_pcap(&g_app_context);
-            stop_probe_sniffer(&g_app_context);
+            stop_probe_monitor(&g_app_context);
         }
     } else if (heap > 90000) {
         g_emergencyHeapLatch = false;
@@ -1346,7 +1346,7 @@ void setup() {
     g_app_context.wifi_scan.paused = true;
     g_app_context.wifi_scan.last_scan_ms = 0;
     g_app_context.wifi_scan.selected_net = -1;
-    g_app_context.wifi_scan.deauth_sta_target = -1;
+    g_app_context.wifi_scan.reconnect_sta_target = -1;
     g_app_context.wifi_scan.started = false;
     g_app_context.wifi_scan.scan_timer = nullptr;
     g_app_context.audit.current_mode = AUDIT_NONE;
@@ -1357,17 +1357,17 @@ void setup() {
     memset(g_app_context.audit.pmkid_value, 0, sizeof(g_app_context.audit.pmkid_value));
     memset(g_app_context.audit.pmkid_sta_mac, 0, sizeof(g_app_context.audit.pmkid_sta_mac));
     memset(g_app_context.audit.pmkid_target_bssid, 0, sizeof(g_app_context.audit.pmkid_target_bssid));
-    g_app_context.sniffer.pcap_active = false;
-    g_app_context.sniffer.probe_active = false;
-    g_app_context.sniffer.pcap_queue = nullptr;
-    g_app_context.sniffer.probe_queue = nullptr;
-    g_app_context.sniffer.pcap_packet_count = 0;
-    g_app_context.sniffer.last_hop_ms = 0;
-    g_app_context.sniffer.channel = 1;
-    g_app_context.sniffer.pcap_ch_locked = false;
-    g_app_context.sniffer.pcap_locked_ch = 1;
-    g_app_context.ble.sniff_active = false;
-    g_app_context.ble.flood_active = false;
+    g_app_context.capture.pcap_active = false;
+    g_app_context.capture.probe_active = false;
+    g_app_context.capture.pcap_queue = nullptr;
+    g_app_context.capture.probe_queue = nullptr;
+    g_app_context.capture.pcap_packet_count = 0;
+    g_app_context.capture.last_hop_ms = 0;
+    g_app_context.capture.channel = 1;
+    g_app_context.capture.pcap_ch_locked = false;
+    g_app_context.capture.pcap_locked_ch = 1;
+    g_app_context.ble.scan_active = false;
+    g_app_context.ble.adv_test_active = false;
     g_app_context.ble.busy = false;
     g_app_context.ble.nimble_ready = false;
     g_app_context.ble.scanner = nullptr;
@@ -1394,7 +1394,7 @@ void setup() {
 
     // Initialize modules
     wifi_scanner_init(&g_app_context);
-    pentest_attacks_init(&g_app_context);
+    audit_actions_init(&g_app_context);
     ble_tasks_init(&g_app_context);
     pcap_and_probes_init(&g_app_context);
     
@@ -1457,10 +1457,10 @@ void main_app_task(void *pvParameters) {
         if (pending_stop_all) {
             g_app_context.ui_busy = true;
             
-            stop_pentest(&g_app_context);
+            stop_audit_action(&g_app_context);
             stop_ble(&g_app_context);
             stop_pcap(&g_app_context);
-            stop_probe_sniffer(&g_app_context);
+            stop_probe_monitor(&g_app_context);
 
             if (!g_app_context.wifi_scan.paused && g_app_context.wifi_scan.started) {
                 g_app_context.wifi_scan.paused = true;
@@ -1492,22 +1492,22 @@ void main_app_task(void *pvParameters) {
         }
 
         if (req_stop_probe) {
-            stop_probe_sniffer(&g_app_context);
+            stop_probe_monitor(&g_app_context);
             req_stop_probe = false;
         }
 
-        if (req_start_ble_flood) {
-            start_ble_flood(&g_app_context);
-            queue_local_ui_text(UI_EVT_SET_BLE_FLOOD_BUTTON, "STOP BLE FLOOD");
-            queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 BLE FLOOD ACTIVE#\n\nSpoofing Apple devices...");
-            req_start_ble_flood = false;
+        if (req_start_ble_adv_test) {
+            start_ble_adv_test(&g_app_context);
+            queue_local_ui_text(UI_EVT_SET_BLE_ADV_TEST_BUTTON, "STOP BLE ADV TEST");
+            queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#FF4444 BLE ADV TEST ACTIVE#\n\nEmulating Apple-like advertisements...");
+            req_start_ble_adv_test = false;
         }
 
-        if (req_start_ble_sniff) {
-            start_ble_sniff(&g_app_context);
-            queue_local_ui_text(UI_EVT_SET_BLE_SNIFF_BUTTON, "STOP BLE SNIFF");
-            queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#00FF88 BLE SNIFFING#\n\nListening...");
-            req_start_ble_sniff = false;
+        if (req_start_ble_scan) {
+            start_ble_scan(&g_app_context);
+            queue_local_ui_text(UI_EVT_SET_BLE_SCAN_BUTTON, "STOP BLE SCAN");
+            queue_local_ui_text(UI_EVT_SET_BLE_STATUS, "#00FF88 BLE SCANNING#\n\nListening...");
+            req_start_ble_scan = false;
         }
 
         if (req_start_pcap) {
@@ -1518,8 +1518,8 @@ void main_app_task(void *pvParameters) {
         }
 
         if (req_start_probe) {
-            start_probe_sniffer(&g_app_context);
-            queue_local_ui_text(UI_EVT_SET_PROBE_BUTTON, "STOP PROBE SNIFF");
+            start_probe_monitor(&g_app_context);
+            queue_local_ui_text(UI_EVT_SET_PROBE_BUTTON, "STOP PROBE MONITOR");
             req_start_probe = false;
         }
 
@@ -1539,8 +1539,8 @@ void main_app_task(void *pvParameters) {
         if (now - last_ble_ui_ms >= 20) {
             last_ble_ui_ms = now;
             t = millis();
-            set_last_state_fmt("STAGE: process_ble_sniff_ui");
-            process_ble_sniff_ui(&g_app_context);
+            set_last_state_fmt("STAGE: process_ble_scan_ui");
+            process_ble_scan_ui(&g_app_context);
             safe_wdt_reset(g_mainTaskWdtAdded);
             if (time_budget_exceeded(loopStart, loopBudgetMs)) { vTaskDelay(pdMS_TO_TICKS(1)); continue; }
         }
@@ -1554,15 +1554,15 @@ void main_app_task(void *pvParameters) {
 
             Serial.printf(
                 "[DIAG] heap=%u min=%u largest=%u psram=%u "
-                "pcapQ=%u probeQ=%u ble(sniff=%d flood=%d busy=%d ready=%d)\n",
+                "pcapQ=%u probeQ=%u ble(scan=%d advTest=%d busy=%d ready=%d)\n",
                 ESP.getFreeHeap(),
                 ESP.getMinFreeHeap(),
                 heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
                 ESP.getFreePsram(),
-                g_app_context.sniffer.pcap_queue ? uxQueueMessagesWaiting(g_app_context.sniffer.pcap_queue) : 0,
-                g_app_context.sniffer.probe_queue ? uxQueueMessagesWaiting(g_app_context.sniffer.probe_queue) : 0,
-                g_app_context.ble.sniff_active,
-                g_app_context.ble.flood_active,
+                g_app_context.capture.pcap_queue ? uxQueueMessagesWaiting(g_app_context.capture.pcap_queue) : 0,
+                g_app_context.capture.probe_queue ? uxQueueMessagesWaiting(g_app_context.capture.probe_queue) : 0,
+                g_app_context.ble.scan_active,
+                g_app_context.ble.adv_test_active,
                 g_app_context.ble.busy,
                 g_app_context.ble.nimble_ready
             );
@@ -1573,7 +1573,7 @@ void main_app_task(void *pvParameters) {
             Serial.println("\n--- [PERFORMANCE STATS (Last 10s)] ---");
             perf_ui_timer.print_and_reset("lv_timer_handler");
             perf_ui_queue.print_and_reset("process_ui_queue");
-            perf_ble_ui.print_and_reset("process_ble_sniff_ui");
+            perf_ble_ui.print_and_reset("process_ble_scan_ui");
             perf_pcap.print_and_reset("process_pcap_queue");
             perf_probe.print_and_reset("process_probe_queue");
             perf_chan_hop.print_and_reset("process_channel_hop");

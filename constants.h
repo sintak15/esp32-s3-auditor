@@ -37,12 +37,12 @@
 #define STA_TIMEOUT_MS 30000 // 30 seconds
 #define AP_SCAN_INTERVAL_MS 5000 // 5 seconds
 
-// PCAP Sniffer
+// PCAP Capture
 #define MAX_PCAP_PACKET_SIZE 256 // Max size of 802.11 frame to capture
 #define PCAP_QUEUE_SIZE 50 // Number of packets in the ring buffer
-#define CHANNEL_HOP_INTERVAL_MS 100 // Time to stay on a channel during sniffing
+#define CHANNEL_HOP_INTERVAL_MS 100 // Time to stay on a channel while monitoring
 
-// Probe Sniffer
+// Probe Monitor
 #define PROBE_MAX_SSID_LEN 32
 #define PROBE_QUEUE_SIZE 25
 #define MAX_LIST_MEMORY 100 // Max items in UI list before clearing
@@ -51,7 +51,7 @@
 #define BLE_RING_SIZE 32 // Size of BLE ring buffer for UI display (expanded for larger bursts)
 
 // NVS (Non-Volatile Storage)
-#define NVS_NAMESPACE "pentester"
+#define NVS_NAMESPACE "auditor_suite"
 #define NVS_BEACON_SSIDS_KEY "beacon_ssids"
 #define MAX_BEACON_SSIDS 10
 
@@ -65,7 +65,7 @@
 
 // SD Logger File Names
 #define WIFI_SCAN_LOG "/WIFI_SCAN.CSV"
-#define PMKID_HASH_LOG "/PMKID.hc22000"
-#define PMKID_CSV_LOG "/PMKID.CSV"
-#define BLE_SNIFF_LOG "/BLE_LOG.CSV"
-#define PROBE_REQ_LOG "/PROBES.TXT"
+#define PMKID_HASH_LOG "/PMKID_AUDIT.hc22000"
+#define PMKID_CSV_LOG "/PMKID_AUDIT.CSV"
+#define BLE_SCAN_LOG "/BLE_SCAN.CSV"
+#define PROBE_REQ_LOG "/PROBE_MON.TXT"

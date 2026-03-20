@@ -354,7 +354,7 @@ typedef struct _meshtastic_ModuleConfig_RangeTestConfig {
     /* Bool value indicating that this node should save a RangeTest.csv file.
  ESP32 Only */
     bool save;
-    /* Bool indicating that the node should cleanup / destroy it's RangeTest.csv file.
+    /* Bool indicating that the node should cleanup / remove its RangeTest.csv file.
  ESP32 Only */
     bool clear_on_reboot;
 } meshtastic_ModuleConfig_RangeTestConfig;

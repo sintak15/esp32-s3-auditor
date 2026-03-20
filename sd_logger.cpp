@@ -33,7 +33,7 @@ const char* get_file_path(LogTarget target) {
         case LOG_TARGET_SCAN: return WIFI_SCAN_LOG;
         case LOG_TARGET_PMKID_HASH: return PMKID_HASH_LOG;
         case LOG_TARGET_PMKID_CSV: return PMKID_CSV_LOG;
-        case LOG_TARGET_BLE: return BLE_SNIFF_LOG;
+        case LOG_TARGET_BLE: return BLE_SCAN_LOG;
         case LOG_TARGET_PROBE: return PROBE_REQ_LOG;
         default: return "/unknown.log";
     }
@@ -78,7 +78,7 @@ void sd_logger_init() {
     SD_MMC.setPins(38, 40, 39, 41, 48, 47);
     sd_ready = SD_MMC.begin("/sdcard", true);
     if (sd_ready) {
-        File f = SD_MMC.open(BLE_SNIFF_LOG, FILE_APPEND);
+        File f = SD_MMC.open(BLE_SCAN_LOG, FILE_APPEND);
         if (f) {
             if (f.size() == 0) f.println("timestamp,mac,rssi");
             f.close();
@@ -165,9 +165,9 @@ void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl
 
     LogMsg msg1;
     msg1.target = LOG_TARGET_PMKID_HASH;
-    snprintf(msg1.line, sizeof(msg1.line), "PMKID*%s*%s*%s*%s\n", ph, ah, ch, ssid); // Hashcat expects raw SSID
+    snprintf(msg1.line, sizeof(msg1.line), "PMKID*%s*%s*%s*%s\n", ph, ah, ch, ssid); // Tools that ingest .hc22000 typically expect raw SSID
     if (xQueueSend(sd_log_queue, &msg1, 0) != pdPASS) {
-        Serial.println("[SD_LOG] Warning: Queue full, dropped PMKID Hashcat log.");
+        Serial.println("[SD_LOG] Warning: Queue full, dropped PMKID hc22000 log.");
     }
 
     LogMsg msg2;
@@ -178,13 +178,13 @@ void sd_log_pmkid(const uint8_t *pmkid, const uint8_t *ap_mac, const uint8_t *cl
     }
 }
 
-void sd_log_ble_sniff(unsigned long timestamp, const char* mac, int8_t rssi) {
+void sd_log_ble_scan(unsigned long timestamp, const char* mac, int8_t rssi) {
     if (!sd_ready || !sd_log_queue || !sd_has_working_heap()) return;
     LogMsg msg;
     msg.target = LOG_TARGET_BLE;
     snprintf(msg.line, sizeof(msg.line), "%lu,%s,%d\n", timestamp, mac, rssi);
     if (xQueueSend(sd_log_queue, &msg, 0) != pdPASS) {
-        Serial.println("[SD_LOG] Warning: Queue full, dropped BLE sniff log.");
+        Serial.println("[SD_LOG] Warning: Queue full, dropped BLE scan log.");
     }
 }
 
@@ -209,28 +209,28 @@ bool sd_logger_pcap_file_open(AppContext* context) { // Renamed function
     }
 
     char fn[32];
-    sprintf(fn, "/cap_%lu.pcap", millis());
-    context->sniffer.pcap_file = SD_MMC.open(fn, FILE_WRITE);
+    sprintf(fn, "/capture_%lu.pcap", millis());
+    context->capture.pcap_file = SD_MMC.open(fn, FILE_WRITE);
     
-    if (!context->sniffer.pcap_file) {
+    if (!context->capture.pcap_file) {
         Serial.println("[PCAP] open failed");
         return false;
     }
     
     pcap_global_header gh = {0xa1b2c3d4, 2, 4, 0, 0, 65535, 105};
-    size_t w = context->sniffer.pcap_file.write((uint8_t*)&gh, sizeof(gh));
+    size_t w = context->capture.pcap_file.write((uint8_t*)&gh, sizeof(gh));
     if (w != sizeof(gh)) {
         Serial.println("[PCAP] header write failed");
-        context->sniffer.pcap_file.close();
-        context->sniffer.pcap_file = File();
+        context->capture.pcap_file.close();
+        context->capture.pcap_file = File();
         return false;
     }
-    context->sniffer.pcap_file.flush();
+    context->capture.pcap_file.flush();
     return true;
 }
 
 bool sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // Renamed function
-    if (!context || !context->sniffer.pcap_file) return false;
+    if (!context || !context->capture.pcap_file) return false;
 
     if (!sd_has_working_heap(24576)) {
         Serial.println("[PCAP] write skipped: low internal heap");
@@ -244,26 +244,26 @@ bool sd_logger_pcap_file_write(AppContext* context, pcap_record_t* record) { // 
     h.orig_len = record->len;
     
     uint32_t t = millis();
-    size_t w1 = context->sniffer.pcap_file.write((uint8_t*)&h, sizeof(h));
-    size_t w2 = context->sniffer.pcap_file.write(record->payload, record->len);
+    size_t w1 = context->capture.pcap_file.write((uint8_t*)&h, sizeof(h));
+    size_t w2 = context->capture.pcap_file.write(record->payload, record->len);
     uint32_t dt = millis() - t;
     
     if (dt > 20) Serial.printf("[DIAG] slow: sd_logger_pcap_file_write %lu ms\n", (unsigned long)dt);
     
     if (w1 != sizeof(h) || w2 != record->len) {
         Serial.println("[PCAP] WRITE FAILED");
-        context->sniffer.pcap_file.flush();
-        context->sniffer.pcap_file.close();
-        context->sniffer.pcap_file = File(); // 🔴 REQUIRED: Nullify dangling handle
+        context->capture.pcap_file.flush();
+        context->capture.pcap_file.close();
+        context->capture.pcap_file = File(); // 🔴 REQUIRED: Nullify dangling handle
         return false;
     }
     return true;
 }
 
 void sd_logger_pcap_file_close(AppContext* context) { // Renamed function
-    if (context->sniffer.pcap_file) {
-        context->sniffer.pcap_file.flush();
-        context->sniffer.pcap_file.close();
-        context->sniffer.pcap_file = File(); // 🔴 REQUIRED: Nullify dangling handle
+    if (context->capture.pcap_file) {
+        context->capture.pcap_file.flush();
+        context->capture.pcap_file.close();
+        context->capture.pcap_file = File(); // 🔴 REQUIRED: Nullify dangling handle
     }
 }

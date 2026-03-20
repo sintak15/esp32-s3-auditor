@@ -12,7 +12,7 @@ extern "C" {
 void wifi_scanner_init(AppContext *ctx);
 const char* enc_str(uint8_t enc);   // <-- added declaration
 
-void restore_sta_sniffer(AppContext *ctx);
+void restore_sta_monitor(AppContext *ctx);
 void run_ap_scan(AppContext *ctx);
 void render_scan_list(AppContext *ctx);
 void set_promiscuous_channel(uint8_t ch);
