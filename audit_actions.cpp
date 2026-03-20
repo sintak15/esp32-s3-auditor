@@ -66,11 +66,20 @@ static void show_audit_buttons(bool show) {
 }
 
 void stop_audit_action(AppContext* context) {
-    if (context->audit.audit_timer) {
-        lv_timer_del(context->audit.audit_timer);
-        context->audit.audit_timer = nullptr;
+    if (context->audit.reconnect_timer) {
+        lv_timer_del(context->audit.reconnect_timer);
+        context->audit.reconnect_timer = nullptr;
     }
-    if (context->audit.current_mode == AUDIT_PMKID) {
+    if (context->audit.beacon_timer) {
+        lv_timer_del(context->audit.beacon_timer);
+        context->audit.beacon_timer = nullptr;
+    }
+    if (context->audit.pmkid_timer) {
+        lv_timer_del(context->audit.pmkid_timer);
+        context->audit.pmkid_timer = nullptr;
+    }
+
+    if (context->audit.current_mode & AUDIT_PMKID) {
         if (context->audit.pmkid_via_companion) {
             companion_stop_all();
         } else {
@@ -96,7 +105,14 @@ void reconnect_tick(lv_timer_t *timer) {
     int reconnect_sta_target = context->wifi_scan.reconnect_sta_target;
 
     if (selectedNet < 0 && reconnect_sta_target < 0) {
-        stop_audit_action(context);
+        if (context->audit.reconnect_timer) {
+            lv_timer_del(context->audit.reconnect_timer);
+            context->audit.reconnect_timer = nullptr;
+        }
+        context->audit.current_mode &= ~AUDIT_RECONNECT;
+        if (context->audit.current_mode == AUDIT_NONE) {
+            lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
+        }
         return;
     }
 
@@ -198,7 +214,14 @@ void pmkid_tick(lv_timer_t *timer) {
             const uint32_t now = millis();
             if (last_ok_ms && (now - last_ok_ms) > 15000) {
                 lv_label_set_text(lbl_audit_status, "#FF4444 Companion link unavailable#");
-                stop_audit_action(context);
+                if (context->audit.pmkid_timer) {
+                    lv_timer_del(context->audit.pmkid_timer);
+                    context->audit.pmkid_timer = nullptr;
+                }
+                context->audit.current_mode &= ~AUDIT_PMKID;
+                if (context->audit.current_mode == AUDIT_NONE) {
+                    lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
+                }
             }
             return;
         }
@@ -237,7 +260,14 @@ void pmkid_tick(lv_timer_t *timer) {
         } else {
             lv_label_set_text(lbl_audit_status, "#FF4444 PMKID CAPTURED!#\nNo SD card");
         }
-        stop_audit_action(context);
+        if (context->audit.pmkid_timer) {
+            lv_timer_del(context->audit.pmkid_timer);
+            context->audit.pmkid_timer = nullptr;
+        }
+        context->audit.current_mode &= ~AUDIT_PMKID;
+        if (context->audit.current_mode == AUDIT_NONE) {
+            lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
+        }
     }
 }
 
@@ -297,7 +327,7 @@ void IRAM_ATTR pmkid_monitor_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!buf || !audit_context) return;
 
     AppContext* context = audit_context;
-    if (context->audit.current_mode != AUDIT_PMKID) return;
+    if (!(context->audit.current_mode & AUDIT_PMKID)) return;
     if (context->audit.pmkid_found) return;
     if (type != WIFI_PKT_DATA) return;
 

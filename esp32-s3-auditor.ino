@@ -832,14 +832,12 @@ void navigate_to(int tab) {
     // If a PMKID monitor is running, keep it active when leaving the Audit tab.
     // The monitor is driven by an LVGL timer + WiFi promiscuous callback (or companion),
     // and should not be coupled to which tab is currently visible.
-    if (g_app_context.audit.current_mode == AUDIT_PMKID) {
+    if ((g_app_context.audit.current_mode & AUDIT_PMKID) || (g_app_context.audit.current_mode & AUDIT_RECONNECT)) {
         pending_stop_audit = false;
         // When using the companion, allow the main scan loop to remain active.
-        if (g_app_context.audit.pmkid_via_companion) {
+        if ((g_app_context.audit.current_mode & AUDIT_PMKID) && g_app_context.audit.pmkid_via_companion) {
             pending_pause_scan = false;
         }
-    } else if (g_app_context.audit.current_mode == AUDIT_RECONNECT) {
-        pending_stop_audit = false;
     }
 
     // BLE advertisement test is not passive; stop it on navigation.
@@ -922,13 +920,13 @@ void cb_view_linked(lv_event_t*) {
 void cb_start_reconnect_test(lv_event_t*) {
     // Corrected access to selected_net and reconnect_sta_target
     if (g_app_context.wifi_scan.selected_net < 0 && g_app_context.wifi_scan.reconnect_sta_target < 0) return;
-    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_audit_action(&g_app_context);
+    if (g_app_context.audit.current_mode & AUDIT_RECONNECT) return; // Already running
     
     if (g_app_context.wifi_scan.selected_net >= 0) { // Corrected access
         set_promiscuous_channel(g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].channel); // Corrected access
     }
-    g_app_context.audit.current_mode = AUDIT_RECONNECT;
-    g_app_context.audit.audit_timer = lv_timer_create(reconnect_tick, 50, &g_app_context);
+    g_app_context.audit.current_mode |= AUDIT_RECONNECT;
+    g_app_context.audit.reconnect_timer = lv_timer_create(reconnect_tick, 50, &g_app_context);
     
     if (g_app_context.wifi_scan.reconnect_sta_target >= 0 && g_app_context.wifi_scan.reconnect_sta_target < g_app_context.wifi_scan.sta_count) { // Corrected access
         char sm[18];
@@ -938,33 +936,30 @@ void cb_start_reconnect_test(lv_event_t*) {
         lv_label_set_text_fmt(lbl_audit_status, "#FF4444 RECONNECT TEST ACTIVE#\nNetwork: %.16s", g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net].ssid);
     }
     lv_obj_add_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
 
 void cb_start_beacon(lv_event_t*) {
-    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_audit_action(&g_app_context);
+    if (g_app_context.audit.current_mode & AUDIT_BEACON) return; // Already running
     set_promiscuous_channel(1);
-    g_app_context.audit.current_mode = AUDIT_BEACON;
+    g_app_context.audit.current_mode |= AUDIT_BEACON;
     g_app_context.audit.beacon_idx = 0;
-    g_app_context.audit.audit_timer = lv_timer_create(beacon_tick, 100, &g_app_context);
+    g_app_context.audit.beacon_timer = lv_timer_create(beacon_tick, 100, &g_app_context);
     lv_label_set_text(lbl_audit_status, "#FFAA00 BEACON LOAD ACTIVE#");
-    lv_obj_add_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
 
 void cb_start_pmkid(lv_event_t*) {
     if (g_app_context.wifi_scan.selected_net < 0) return; // Corrected access
+    if (g_app_context.audit.current_mode & AUDIT_PMKID) return; // Already running
+
     CompanionStatus cst = {};
     const bool use_companion = companion_read_status(&cst);
     if (!use_companion && (g_app_context.capture.pcap_active || g_app_context.capture.probe_active)) {
         lv_label_set_text(lbl_audit_status, "#FF4444 Stop PCAP/Probes first#");
         return;
     }
-    if (g_app_context.audit.current_mode != AUDIT_NONE) stop_audit_action(&g_app_context);
 
     // Local PMKID monitoring requires channel lock + callback swap; pause scan first.
     if (!use_companion) {
@@ -1000,8 +995,8 @@ void cb_start_pmkid(lv_event_t*) {
     strncpy(g_app_context.audit.pmkid_target_ssid, target_ssid, sizeof(g_app_context.audit.pmkid_target_ssid) - 1);
     g_app_context.audit.pmkid_target_ssid[sizeof(g_app_context.audit.pmkid_target_ssid) - 1] = '\0';
 
-    g_app_context.audit.current_mode = AUDIT_PMKID;
-    g_app_context.audit.audit_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
+    g_app_context.audit.current_mode |= AUDIT_PMKID;
+    g_app_context.audit.pmkid_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
 
     if (use_companion) {
         // Use the companion MCU for PMKID monitoring so the main radio can keep scanning.
@@ -1021,8 +1016,6 @@ void cb_start_pmkid(lv_event_t*) {
         lv_label_set_text(lbl_audit_status, "#00AAFF PMKID MONITORING...#\nWaiting for handshake");
     }
 
-    lv_obj_add_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
@@ -1405,7 +1398,9 @@ void setup() {
     g_app_context.wifi_scan.started = false;
     g_app_context.wifi_scan.scan_timer = nullptr;
     g_app_context.audit.current_mode = AUDIT_NONE;
-    g_app_context.audit.audit_timer = nullptr;
+    g_app_context.audit.reconnect_timer = nullptr;
+    g_app_context.audit.beacon_timer = nullptr;
+    g_app_context.audit.pmkid_timer = nullptr;
     g_app_context.audit.beacon_idx = 0;
     g_app_context.audit.pmkid_found = false;
     g_app_context.audit.pmkid_via_companion = false;
@@ -1532,7 +1527,7 @@ void main_app_task(void *pvParameters) {
                 // Only disable promiscuous if nothing else is using it.
                 if (!g_app_context.capture.pcap_active &&
                     !g_app_context.capture.probe_active &&
-                    !(g_app_context.audit.current_mode == AUDIT_PMKID && !g_app_context.audit.pmkid_via_companion)) {
+                    !(g_app_context.audit.current_mode & AUDIT_PMKID && !g_app_context.audit.pmkid_via_companion)) {
                     esp_wifi_set_promiscuous(false);
                 }
                 queue_local_ui_text(UI_EVT_SET_SCAN_PAUSE, LV_SYMBOL_PLAY " RESUME");

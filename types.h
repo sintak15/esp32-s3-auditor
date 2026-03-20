@@ -59,7 +59,13 @@ struct pcap_packet_header {
 
 enum ScanView { VIEW_AP, VIEW_STA, VIEW_LINKED };
 
-enum AuditMode { AUDIT_NONE, AUDIT_RECONNECT, AUDIT_BEACON, AUDIT_PMKID };
+// enum AuditMode { AUDIT_NONE, AUDIT_RECONNECT, AUDIT_BEACON, AUDIT_PMKID };
+typedef uint8_t AuditMode;
+const AuditMode AUDIT_NONE = 0;
+const AuditMode AUDIT_RECONNECT = 1 << 0;
+const AuditMode AUDIT_BEACON    = 1 << 1;
+const AuditMode AUDIT_PMKID     = 1 << 2;
+
 
 // Custom struct for MAC addresses to avoid String overhead in std::set
 struct MacAddress {
@@ -111,7 +117,9 @@ struct ScanState {
 // Define AuditState
 struct AuditState {
   AuditMode current_mode;
-  lv_timer_t* audit_timer;
+  lv_timer_t* reconnect_timer;
+  lv_timer_t* beacon_timer;
+  lv_timer_t* pmkid_timer;
   int beacon_idx;
   bool pmkid_found;
   bool pmkid_via_companion;
