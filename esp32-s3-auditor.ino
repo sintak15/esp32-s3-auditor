@@ -826,7 +826,7 @@ void navigate_to(int tab) {
     // If a PMKID monitor is running, keep it active when leaving the Audit tab.
     // The monitor is driven by an LVGL timer + WiFi promiscuous callback (or companion),
     // and should not be coupled to which tab is currently visible.
-    if (g_app_context.audit.current_mode == AUDIT_PMKID && tab != 2) {
+    if (g_app_context.audit.current_mode == AUDIT_PMKID) {
         pending_stop_audit = false;
         // When using the companion, allow the main scan loop to remain active.
         if (g_app_context.audit.pmkid_via_companion) {
