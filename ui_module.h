@@ -4,7 +4,7 @@
 #include "constants.h"
 
 extern lv_obj_t *main_screen, *status_bar, *tabview;
-extern lv_obj_t *lbl_sd, *lbl_wifi, *lbl_batt, *lbl_batt_pct, *lbl_msg;
+extern lv_obj_t *lbl_sd, *lbl_wifi, *lbl_batt_pct, *lbl_msg;
 extern lv_obj_t *tab_home, *tab_scan, *tab_audit, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora, *tab_gps;
 extern lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 extern lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;

@@ -1468,7 +1468,7 @@ void setup() {
 
     ui_build();
     if (!tabview)    { Serial.println("FATAL: tabview NULL after ui_build");    while(1) delay(100); }
-    if (!lbl_batt)   { Serial.println("FATAL: lbl_batt NULL after ui_build");   while(1) delay(100); }
+    if (!lbl_batt_pct) { Serial.println("FATAL: lbl_batt_pct NULL after ui_build"); while(1) delay(100); }
     if (!lbl_sd)     { Serial.println("FATAL: lbl_sd NULL after ui_build");     while(1) delay(100); }
     if (!lbl_wifi)   { Serial.println("FATAL: lbl_wifi NULL after ui_build");   while(1) delay(100); }
     set_ui_update_context(&g_app_context);

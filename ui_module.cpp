@@ -14,7 +14,7 @@ extern void reset_battery_calibration();
 
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
-lv_obj_t *lbl_sd, *lbl_wifi, *lbl_batt, *lbl_batt_pct, *lbl_msg;
+lv_obj_t *lbl_sd, *lbl_wifi, *lbl_batt_pct, *lbl_msg;
 lv_obj_t *tab_home, *tab_scan, *tab_audit, *tab_ble, *tab_pcap, *tab_probes, *tab_settings, *tab_lora, *tab_gps; 
 lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
@@ -310,8 +310,6 @@ void ui_build() {
   lv_obj_set_style_text_color(lbl_wifi, lv_color_hex(0xFFFFFF), 0);
   lbl_sd=lv_label_create(icont);      lv_label_set_text(lbl_sd, LV_SYMBOL_SD_CARD);
   lv_obj_set_style_text_color(lbl_sd, sd_card_ready()?lv_color_hex(UI::Colors::Success):lv_color_hex(UI::Colors::Error), 0);
-  lbl_batt=lv_label_create(icont);    lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_FULL);
-  lv_obj_set_style_text_color(lbl_batt, lv_color_hex(0xFFFFFF), 0);
   lbl_batt_pct=lv_label_create(icont); lv_label_set_text(lbl_batt_pct, "--%");
   lv_obj_set_style_text_color(lbl_batt_pct, lv_color_hex(0xAAAAAA), 0);
   lv_obj_set_style_text_font(lbl_batt_pct, &lv_font_montserrat_14, 0);

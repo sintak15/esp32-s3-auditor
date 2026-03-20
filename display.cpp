@@ -11,7 +11,7 @@ static uint8_t g_user_backlight = 255;
 static bool g_screen_dimmed = false;
 
 // Forward declare from ui_module
-extern lv_obj_t *lbl_batt, *lbl_batt_pct, *lbl_sd, *lbl_wifi, *lbl_msg;
+extern lv_obj_t *lbl_batt_pct, *lbl_sd, *lbl_wifi, *lbl_msg;
 extern lv_obj_t *ta_lora_log;
 extern lv_obj_t* tabview;
 extern lv_obj_t *lbl_lora_stats;
@@ -256,7 +256,7 @@ void ui_update_tick(lv_timer_t *timer) {
     uint32_t t_stage;
     
     // Guard against timer firing before ui_build() has finished assigning all objects
-    if (!lbl_batt || !lbl_batt_pct || !lbl_sd || !lbl_wifi || !lbl_msg || !tabview ||
+    if (!lbl_batt_pct || !lbl_sd || !lbl_wifi || !lbl_msg || !tabview ||
         !ta_lora_log || !lora_log_panel || !ta_lora_chat || !lora_chat_panel ||
         !lbl_lora_stats || !lora_stats_panel || !nodedb_list || !lora_nodedb_panel || !lbl_gps_data) {
         Serial.println("[UI] Skipping update - objects not ready");
@@ -268,8 +268,6 @@ void ui_update_tick(lv_timer_t *timer) {
 
     t_stage = millis();
     static int last_batteryPct = -1;
-    static uint32_t last_batteryMv = 0;
-    static bool last_isCharging = false;
     static bool last_sdMounted = false;
     static int last_batt_col = -1;
 
@@ -285,22 +283,11 @@ void ui_update_tick(lv_timer_t *timer) {
         batt_col = UI::Colors::Success; // Bright green when charging
     }
     
-    if (ss.batteryPct != last_batteryPct || ss.isCharging != last_isCharging || ss.batteryMv != last_batteryMv) {
-        if (ss.isCharging) {
-            lv_label_set_text(lbl_batt, LV_SYMBOL_CHARGE);
-        } else {
-            if (ss.batteryPct > 80) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_FULL);
-            else if (ss.batteryPct > 60) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_3);
-            else if (ss.batteryPct > 35) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_2);
-            else if (ss.batteryPct > 15) lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_1);
-            else lv_label_set_text(lbl_batt, LV_SYMBOL_BATTERY_EMPTY);
-        }
-        char bpbuf[24];
-        snprintf(bpbuf, sizeof(bpbuf), "%d%% (%.2fV)", ss.batteryPct, (float)ss.batteryMv / 1000.0f);
+    if (ss.batteryPct != last_batteryPct) {
+        char bpbuf[12];
+        snprintf(bpbuf, sizeof(bpbuf), "%d%%", ss.batteryPct);
         lv_label_set_text(lbl_batt_pct, bpbuf);
         last_batteryPct = ss.batteryPct;
-        last_isCharging = ss.isCharging;
-        last_batteryMv = ss.batteryMv;
     }
 
     // Toggle Low Battery Alert Border
@@ -329,7 +316,6 @@ void ui_update_tick(lv_timer_t *timer) {
     }
 
     if ((int)batt_col != last_batt_col) {
-        lv_obj_set_style_text_color(lbl_batt, lv_color_hex(batt_col), 0);
         lv_obj_set_style_text_color(lbl_batt_pct, lv_color_hex(batt_col), 0);
         last_batt_col = batt_col;
     }
