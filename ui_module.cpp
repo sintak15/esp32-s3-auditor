@@ -186,8 +186,18 @@ static void companion_status_tick(lv_timer_t *t) {
     hex_bytes(st.pmkid, sizeof(st.pmkid), pmkid_hex, sizeof(pmkid_hex));
   }
 
+  const bool main_pmkid = (g_app_context.audit.current_mode == AUDIT_PMKID);
+  const char* main_mode = "idle";
+  char main_bssid[18] = "--:--:--:--:--:--";
+  if (main_pmkid) {
+    main_mode = g_app_context.audit.pmkid_via_companion ? "PMKID via companion" : "PMKID local";
+    fmt_mac6(g_app_context.audit.pmkid_target_bssid, main_bssid);
+  }
+
   snprintf(buf, sizeof(buf),
            "#00FF88 Link: OK#  proto:%u\n"
+           "Main: %s\n"
+           "Main BSSID: %s\n"
            "Monitor: %s\n"
            "Target: %s  ch:%u\n"
            "BSSID: %s\n"
@@ -197,6 +207,8 @@ static void companion_status_tick(lv_timer_t *t) {
            "\n"
            "#666666 Updates about once per second.#",
            (unsigned)st.proto_version,
+           main_mode,
+           main_bssid,
            st.monitor_active ? "active" : "idle",
            st.target_set ? "set" : "none",
            (unsigned)st.channel,
@@ -341,10 +353,18 @@ void ui_build() {
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
-  lv_obj_set_layout(tab_home, LV_LAYOUT_GRID);
   static lv_coord_t col_dsc[]={LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
   static lv_coord_t row_dsc[]={LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
-  lv_obj_set_grid_dsc_array(tab_home, col_dsc, row_dsc);
+
+  auto setup_hub_grid = [&](lv_obj_t *tab) {
+    lv_obj_set_style_pad_all(tab, UI::Layout::PaddingInner, 0);
+    lv_obj_set_style_pad_row(tab, UI::Layout::PaddingInner, 0);
+    lv_obj_set_style_pad_column(tab, UI::Layout::PaddingInner, 0);
+    lv_obj_set_layout(tab, LV_LAYOUT_GRID);
+    lv_obj_set_grid_dsc_array(tab, col_dsc, row_dsc);
+  };
+
+  setup_hub_grid(tab_home);
 
   auto hub=[](lv_obj_t *p,const char *icon,const char *txt,int c,int r,lv_event_cb_t cb,uint32_t col) {
     lv_obj_t *b=lv_btn_create(p);
@@ -598,9 +618,7 @@ void ui_build() {
   add_return_btn(tab_probes);
 
   // ── Settings Tab ──────────────────────────────
-  lv_obj_set_style_pad_all(tab_settings, 0, 0);
-  lv_obj_set_layout(tab_settings, LV_LAYOUT_GRID);
-  lv_obj_set_grid_dsc_array(tab_settings, col_dsc, row_dsc);
+  setup_hub_grid(tab_settings);
 
   hub(tab_settings, LV_SYMBOL_EDIT,      "SSIDs",    0, 0, [](lv_event_t*){ navigate_to(9); },  0xAAAAAA);
   hub(tab_settings, LV_SYMBOL_SETTINGS,  "DIAG",     1, 0, [](lv_event_t*){ navigate_to(10); }, UI::Colors::Primary);
@@ -1091,11 +1109,7 @@ void ui_build() {
   lv_obj_t *lbl_lora_chat_clear = lv_label_create(btn_lora_chat_clear); lv_label_set_text(lbl_lora_chat_clear, LV_SYMBOL_TRASH " CLEAR"); lv_obj_center(lbl_lora_chat_clear);
 
   // ── LoRa Tab Hub ──────────────────────────────
-  lv_obj_set_style_pad_all(tab_lora, 0, 0);
-  lv_obj_set_layout(tab_lora, LV_LAYOUT_GRID);
-  static lv_coord_t lora_col_dsc[]={LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
-  static lv_coord_t lora_row_dsc[]={LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
-  lv_obj_set_grid_dsc_array(tab_lora, lora_col_dsc, lora_row_dsc);
+  setup_hub_grid(tab_lora);
 
   hub(tab_lora, LV_SYMBOL_FILE, "TERMINAL", 0, 0, [](lv_event_t*) {
       if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {

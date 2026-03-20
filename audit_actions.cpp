@@ -80,6 +80,7 @@ void stop_audit_action(AppContext* context) {
     }
     context->audit.current_mode = AUDIT_NONE;
     context->audit.pmkid_via_companion = false;
+    context->audit.pmkid_target_channel = 1;
     context->wifi_scan.paused = false;
     if (!context->capture.pcap_active && !context->capture.probe_active) {
         esp_wifi_set_promiscuous(false);
@@ -183,11 +184,13 @@ void pmkid_tick(lv_timer_t *timer) {
     if (context->audit.pmkid_via_companion && !context->audit.pmkid_found) {
         static lv_timer_t* last_timer = nullptr;
         static uint32_t last_ok_ms = 0;
+        static uint32_t last_sync_ms = 0;
         if (timer != last_timer) {
             last_timer = timer;
             // Treat session start as "OK recently" so brief I2C contention doesn't
             // immediately end the audit.
             last_ok_ms = millis();
+            last_sync_ms = 0;
         }
 
         CompanionStatus st = {};
@@ -201,6 +204,25 @@ void pmkid_tick(lv_timer_t *timer) {
         }
 
         last_ok_ms = millis();
+
+        // If the companion is connected but not yet showing the expected target/monitor state,
+        // retry the configuration periodically. This avoids "idle/none" states when the bus
+        // was briefly busy during the start sequence.
+        const uint32_t now = last_ok_ms;
+        const uint8_t want_ch = context->audit.pmkid_target_channel ? context->audit.pmkid_target_channel : 1;
+        const bool want_target = (memcmp(context->audit.pmkid_target_bssid, "\0\0\0\0\0\0", 6) != 0);
+        const bool target_mismatch = want_target &&
+                                     (!st.target_set ||
+                                      st.channel != want_ch ||
+                                      memcmp(st.target_bssid, context->audit.pmkid_target_bssid, 6) != 0);
+        if ((target_mismatch || !st.monitor_active) && (now - last_sync_ms) > 1500) {
+            last_sync_ms = now;
+            if (want_target) {
+                (void)companion_set_target(want_ch, context->audit.pmkid_target_bssid);
+            }
+            (void)companion_start_pmkid();
+        }
+
         if (st.pmkid_found) {
             memcpy(context->audit.pmkid_value, st.pmkid, sizeof(context->audit.pmkid_value));
             memcpy(context->audit.pmkid_sta_mac, st.sta_mac, sizeof(context->audit.pmkid_sta_mac));

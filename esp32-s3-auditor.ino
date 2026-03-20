@@ -945,7 +945,8 @@ void cb_start_beacon(lv_event_t*) {
 
 void cb_start_pmkid(lv_event_t*) {
     if (g_app_context.wifi_scan.selected_net < 0) return; // Corrected access
-    const bool use_companion = companion_probe();
+    CompanionStatus cst = {};
+    const bool use_companion = companion_read_status(&cst);
     if (!use_companion && (g_app_context.capture.pcap_active || g_app_context.capture.probe_active)) {
         lv_label_set_text(lbl_audit_status, "#FF4444 Stop PCAP/Probes first#");
         return;
@@ -982,6 +983,7 @@ void cb_start_pmkid(lv_event_t*) {
     }
 
     memcpy(g_app_context.audit.pmkid_target_bssid, target_bssid, 6);
+    g_app_context.audit.pmkid_target_channel = target_channel;
     strncpy(g_app_context.audit.pmkid_target_ssid, target_ssid, sizeof(g_app_context.audit.pmkid_target_ssid) - 1);
     g_app_context.audit.pmkid_target_ssid[sizeof(g_app_context.audit.pmkid_target_ssid) - 1] = '\0';
 
@@ -1393,6 +1395,8 @@ void setup() {
     g_app_context.audit.audit_timer = nullptr;
     g_app_context.audit.beacon_idx = 0;
     g_app_context.audit.pmkid_found = false;
+    g_app_context.audit.pmkid_via_companion = false;
+    g_app_context.audit.pmkid_target_channel = 1;
     memset(g_app_context.audit.pmkid_target_ssid, 0, sizeof(g_app_context.audit.pmkid_target_ssid));
     memset(g_app_context.audit.pmkid_value, 0, sizeof(g_app_context.audit.pmkid_value));
     memset(g_app_context.audit.pmkid_sta_mac, 0, sizeof(g_app_context.audit.pmkid_sta_mac));
