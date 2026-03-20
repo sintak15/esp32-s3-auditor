@@ -46,6 +46,7 @@ lv_obj_t *lbl_pcap_status = nullptr; // Corrected to be a single declaration
 lv_obj_t *low_batt_border = nullptr;
 lv_obj_t *battery_stats_panel = nullptr;
 lv_obj_t *reboot_panel = nullptr;
+lv_obj_t *brightness_panel = nullptr;
 lv_obj_t *lbl_battery_stats = nullptr;
 lv_obj_t *ui_battery_chart = nullptr;
 lv_chart_series_t *ui_battery_series = nullptr;
@@ -187,9 +188,10 @@ void ui_build() {
   sys_stats_panel   = lv_tabview_add_tab(tabview, "Perf");  // Index 11
   battery_stats_panel = lv_tabview_add_tab(tabview, "Batt");// Index 12
   reboot_panel = lv_tabview_add_tab(tabview, "Reboot");     // Index 13
+  brightness_panel = lv_tabview_add_tab(tabview, "Bright"); // Index 14
   
   lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,
-                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, reboot_panel, tv_cont};
+                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, reboot_panel, brightness_panel, tv_cont};
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
@@ -210,6 +212,9 @@ void ui_build() {
     lv_obj_t *li=lv_label_create(b); lv_label_set_text(li,icon);
     lv_obj_set_style_text_color(li, lv_color_hex(col), 0);
     lv_obj_t *lt=lv_label_create(b); lv_label_set_text(lt,txt);
+    lv_obj_set_width(lt, lv_pct(100));
+    lv_label_set_long_mode(lt, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(lt, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(lt,lv_color_hex(0xCCCCCC),0);
   };
   hub(tab_home,LV_SYMBOL_WIFI,      "SCAN",    0,0,cb_nav_scan,                                               UI::Colors::Primary);
@@ -447,58 +452,18 @@ void ui_build() {
   add_return_btn(tab_probes);
 
   // ── Settings Tab ──────────────────────────────
-  lv_obj_set_style_pad_all(tab_settings, 6, 0);
+  lv_obj_set_style_pad_all(tab_settings, 0, 0);
+  lv_obj_set_layout(tab_settings, LV_LAYOUT_GRID);
+  lv_obj_set_grid_dsc_array(tab_settings, col_dsc, row_dsc);
 
-  const int settings_gap = 6;
-  const int settings_step = UI::Layout::ButtonHeight + settings_gap;
-  const int settings_btn_w = SCREEN_W - (UI::Layout::Margin * 2);
-
-  lv_obj_t *btn_open_beacon_ssids = make_action_btn(tab_settings, LV_SYMBOL_EDIT " BEACON SSIDs", &style_btn_dark, 0xAAAAAA, [](lv_event_t *e) {
-      navigate_to(9); 
-  }, UI::Layout::Padding);
-  lv_obj_clear_flag(btn_open_beacon_ssids, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_size(btn_open_beacon_ssids, settings_btn_w, UI::Layout::ButtonHeight);
-
-  lv_obj_t *btn_open_diag = make_action_btn(tab_settings, LV_SYMBOL_SETTINGS " SYSTEM DIAGNOSTICS", &style_btn_dark, 0x00FFCC, [](lv_event_t *e) {
-      navigate_to(10);
-  }, UI::Layout::Padding + settings_step);
-  lv_obj_clear_flag(btn_open_diag, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_diag,0), lv_color_hex(UI::Colors::Primary), 0);
-  lv_obj_set_size(btn_open_diag, settings_btn_w, UI::Layout::ButtonHeight);
-
-  lv_obj_t *btn_open_sys_stats = make_action_btn(tab_settings, LV_SYMBOL_LIST " PERFORMANCE STATS", &style_btn_dark, 0xFFAA00, [](lv_event_t *e) {
-      navigate_to(11);
-  }, UI::Layout::Padding + settings_step * 2);
-  lv_obj_clear_flag(btn_open_sys_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_sys_stats,0), lv_color_hex(UI::Colors::Warning), 0);
-  lv_obj_set_size(btn_open_sys_stats, settings_btn_w, UI::Layout::ButtonHeight);
-
-  lv_obj_t *btn_open_batt_stats = make_action_btn(tab_settings, LV_SYMBOL_BATTERY_3 " BATTERY STATS", &style_btn_dark, 0x00FF88, [](lv_event_t *e) {
-      navigate_to(12);
-  }, UI::Layout::Padding + settings_step * 3);
-  lv_obj_clear_flag(btn_open_batt_stats, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_batt_stats,0), lv_color_hex(UI::Colors::Success), 0);
-  lv_obj_set_size(btn_open_batt_stats, settings_btn_w, UI::Layout::ButtonHeight);
-
-  lv_obj_t *btn_open_reboot = make_action_btn(tab_settings, LV_SYMBOL_POWER " REBOOT", &style_btn_dark, 0xFF4444, [](lv_event_t *e) {
-      navigate_to(13);
-  }, UI::Layout::Padding + settings_step * 4);
-  lv_obj_clear_flag(btn_open_reboot, LV_OBJ_FLAG_HIDDEN); lv_obj_set_style_text_color(lv_obj_get_child(btn_open_reboot,0), lv_color_hex(UI::Colors::Error), 0);
-  lv_obj_set_size(btn_open_reboot, settings_btn_w, UI::Layout::ButtonHeight);
-
-  // Brightness Slider
-  const int slider_y = UI::Layout::Padding + settings_step * 5 + 12;
-  lv_obj_t *slider_bright = lv_slider_create(tab_settings);
-  lv_obj_set_size(slider_bright, settings_btn_w, 12);
-  lv_obj_align(slider_bright, LV_ALIGN_TOP_MID, 0, slider_y);
-  lv_slider_set_range(slider_bright, 10, 255);
-  lv_slider_set_value(slider_bright, 255, LV_ANIM_OFF);
-  lv_obj_add_event_cb(slider_bright, [](lv_event_t *e) {
-      int v = lv_slider_get_value(lv_event_get_target(e));
-      display_set_backlight((uint8_t)v);
-  }, LV_EVENT_VALUE_CHANGED, nullptr);
-  lv_obj_t *lbl_br = lv_label_create(tab_settings);
-  lv_label_set_text(lbl_br, LV_SYMBOL_SETTINGS " SCREEN BRIGHTNESS");
-  lv_obj_align(lbl_br, LV_ALIGN_TOP_MID, 0, slider_y - 16);
-
-  add_return_btn(tab_settings);
+  hub(tab_settings, LV_SYMBOL_EDIT,      "SSIDs",    0, 0, [](lv_event_t*){ navigate_to(9); },  0xAAAAAA);
+  hub(tab_settings, LV_SYMBOL_SETTINGS,  "DIAG",     1, 0, [](lv_event_t*){ navigate_to(10); }, UI::Colors::Primary);
+  hub(tab_settings, LV_SYMBOL_LIST,      "PERF",     0, 1, [](lv_event_t*){ navigate_to(11); }, UI::Colors::Warning);
+  hub(tab_settings, LV_SYMBOL_BATTERY_3, "BATTERY",  1, 1, [](lv_event_t*){ navigate_to(12); }, UI::Colors::Success);
+  hub(tab_settings, LV_SYMBOL_EYE_OPEN,  "BRIGHT",   0, 2, [](lv_event_t*){ navigate_to(14); }, UI::Colors::Warning);
+  hub(tab_settings, LV_SYMBOL_POWER,     "REBOOT",   1, 2, [](lv_event_t*){ navigate_to(13); }, UI::Colors::Error);
+  hub(tab_settings, LV_SYMBOL_HOME,      "HOME",     0, 3, cb_nav_home,                          UI::Colors::Primary);
+  hub(tab_settings, LV_SYMBOL_WIFI,      "SCAN",     1, 3, cb_nav_scan,                          UI::Colors::Primary);
 
   // --- Beacon SSID Sub-Tab ---
   lv_obj_set_style_bg_color(beacon_ssid_panel, lv_color_hex(0x050505), 0);
@@ -731,6 +696,37 @@ void ui_build() {
   lv_obj_t *lbl_reboot = lv_label_create(btn_reboot); lv_label_set_text(lbl_reboot, LV_SYMBOL_POWER " REBOOT NOW"); lv_obj_center(lbl_reboot);
 
   add_settings_back_btn(reboot_panel);
+
+  // --- Brightness Sub-Tab ---
+  lv_obj_set_style_bg_color(brightness_panel, lv_color_hex(UI::Colors::Background), 0);
+  lv_obj_set_style_border_color(brightness_panel, lv_color_hex(UI::Colors::Warning), 0);
+  lv_obj_set_style_border_width(brightness_panel, 2, 0);
+
+  lv_obj_t *lbl_bright_title = lv_label_create(brightness_panel);
+  lv_label_set_text(lbl_bright_title, "#FFFF00 " LV_SYMBOL_EYE_OPEN " BRIGHTNESS#");
+  lv_label_set_recolor(lbl_bright_title, true);
+  lv_obj_align(lbl_bright_title, LV_ALIGN_TOP_MID, 0, 0);
+
+  lv_obj_t *lbl_bright_value = lv_label_create(brightness_panel);
+  lv_obj_set_style_text_color(lbl_bright_value, lv_color_hex(0xAAAAAA), 0);
+  lv_label_set_text_fmt(lbl_bright_value, "Level: %d", 255);
+  lv_obj_align(lbl_bright_value, LV_ALIGN_TOP_MID, 0, 40);
+
+  lv_obj_t *slider_bright = lv_slider_create(brightness_panel);
+  lv_obj_set_size(slider_bright, SCREEN_W - (UI::Layout::Margin * 2), 12);
+  lv_obj_align(slider_bright, LV_ALIGN_TOP_MID, 0, 70);
+  lv_slider_set_range(slider_bright, 10, 255);
+  lv_slider_set_value(slider_bright, 255, LV_ANIM_OFF);
+  lv_obj_add_event_cb(slider_bright, [](lv_event_t *e) {
+      lv_obj_t *lbl = (lv_obj_t *)lv_event_get_user_data(e);
+      lv_obj_t *slider = lv_event_get_target(e);
+      if (!slider) return;
+      int v = lv_slider_get_value(slider);
+      display_set_backlight((uint8_t)v);
+      if (lbl) lv_label_set_text_fmt(lbl, "Level: %d", v);
+  }, LV_EVENT_VALUE_CHANGED, lbl_bright_value);
+
+  add_settings_back_btn(brightness_panel);
 
   // --- LoRa Stats Modal Panel ---
   lora_stats_panel = lv_obj_create(main_screen);
