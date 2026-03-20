@@ -344,6 +344,9 @@ void process_ui_queue() {
                 probe_len = 22;
                 probe_updated = true;
                 break;
+            case UI_EVT_STOP_AUDIT:
+                stop_audit_action(&g_app_context);
+                break;
             case UI_EVT_NAVIGATE:
                 if (tabview) lv_tabview_set_act(tabview, lev.tab_id, LV_ANIM_OFF);
                 break;
@@ -1248,7 +1251,7 @@ void check_emergency_heap() {
             Serial.printf("[EMERGENCY] Heap critically low (%u) - stopping all tasks\n", heap);
             
             stop_ble(&g_app_context);
-            stop_audit_action(&g_app_context);
+            queue_local_ui_text(UI_EVT_STOP_AUDIT, nullptr);
             stop_pcap(&g_app_context);
             stop_probe_monitor(&g_app_context);
         }
