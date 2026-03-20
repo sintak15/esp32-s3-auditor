@@ -189,9 +189,15 @@ void ui_build() {
   battery_stats_panel = lv_tabview_add_tab(tabview, "Batt");// Index 12
   reboot_panel = lv_tabview_add_tab(tabview, "Reboot");     // Index 13
   brightness_panel = lv_tabview_add_tab(tabview, "Bright"); // Index 14
+  lora_log_panel     = lv_tabview_add_tab(tabview, "LoRaTerm");  // Index 15
+  lora_nodedb_panel  = lv_tabview_add_tab(tabview, "LoRaNodes"); // Index 16
+  lora_stats_panel   = lv_tabview_add_tab(tabview, "LoRaStats"); // Index 17
+  lora_chat_panel    = lv_tabview_add_tab(tabview, "LoRaChat");  // Index 18
   
   lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,
-                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, reboot_panel, brightness_panel, tv_cont};
+                        beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, reboot_panel, brightness_panel,
+                        lora_log_panel, lora_nodedb_panel, lora_stats_panel, lora_chat_panel,
+                        tv_cont};
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
   // ── Home Hub 3x2 ──────────────────────────────
@@ -463,7 +469,6 @@ void ui_build() {
   hub(tab_settings, LV_SYMBOL_EYE_OPEN,  "BRIGHT",   0, 2, [](lv_event_t*){ navigate_to(14); }, UI::Colors::Warning);
   hub(tab_settings, LV_SYMBOL_POWER,     "REBOOT",   1, 2, [](lv_event_t*){ navigate_to(13); }, UI::Colors::Error);
   hub(tab_settings, LV_SYMBOL_HOME,      "HOME",     0, 3, cb_nav_home,                          UI::Colors::Primary);
-  hub(tab_settings, LV_SYMBOL_WIFI,      "SCAN",     1, 3, cb_nav_scan,                          UI::Colors::Primary);
 
   // --- Beacon SSID Sub-Tab ---
   lv_obj_set_style_bg_color(beacon_ssid_panel, lv_color_hex(0x050505), 0);
@@ -728,15 +733,12 @@ void ui_build() {
 
   add_settings_back_btn(brightness_panel);
 
-  // --- LoRa Stats Modal Panel ---
-  lora_stats_panel = lv_obj_create(main_screen);
-  lv_obj_set_size(lora_stats_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight); // Cover everything under status bar
-  lv_obj_align(lora_stats_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  // --- LoRa Stats Sub-Tab ---
   lv_obj_set_style_bg_color(lora_stats_panel, lv_color_hex(UI::Colors::Background), 0);
   lv_obj_set_style_border_color(lora_stats_panel, lv_color_hex(UI::Colors::Primary), 0); // Changed to Primary
   lv_obj_set_style_border_width(lora_stats_panel, 2, 0);
-  lv_obj_add_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN); // Hidden by default
   no_scroll(lora_stats_panel);
+  lv_obj_set_style_pad_all(lora_stats_panel, 0, 0);
 
   lv_obj_t *lbl_stats_title = lv_label_create(lora_stats_panel);
   lv_label_set_text(lbl_stats_title, "#00AAFF " LV_SYMBOL_WIFI " LORA NODE STATISTICS#");
@@ -754,21 +756,20 @@ void ui_build() {
   lv_obj_align(btn_close_stats, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
   lv_obj_add_style(btn_close_stats, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_stats, [](lv_event_t *e) {
-      if (lora_stats_panel) lv_obj_add_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN);
+      (void)e;
+      if (kb) lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+      navigate_to(7); // LoRa hub
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lbl_close = lv_label_create(btn_close_stats);
-  lv_label_set_text(lbl_close, LV_SYMBOL_CLOSE " CLOSE");
+  lv_label_set_text(lbl_close, LV_SYMBOL_LEFT " BACK TO LORA");
   lv_obj_center(lbl_close);
 
-  // --- LoRa Node DB Modal Panel ---
-  lora_nodedb_panel = lv_obj_create(main_screen);
-  lv_obj_set_size(lora_nodedb_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight);
-  lv_obj_align(lora_nodedb_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  // --- LoRa Node DB Sub-Tab ---
   lv_obj_set_style_bg_color(lora_nodedb_panel, lv_color_hex(UI::Colors::Background), 0);
   lv_obj_set_style_border_color(lora_nodedb_panel, lv_color_hex(0xFF00FF), 0); // Keep original color for now
   lv_obj_set_style_border_width(lora_nodedb_panel, 2, 0);
-  lv_obj_add_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN);
   no_scroll(lora_nodedb_panel);
+  lv_obj_set_style_pad_all(lora_nodedb_panel, 0, 0);
 
   lv_obj_t *lbl_nodedb_title = lv_label_create(lora_nodedb_panel);
   lv_label_set_text(lbl_nodedb_title, "#FF00FF " LV_SYMBOL_LIST " KNOWN MESH NODES#");
@@ -787,20 +788,18 @@ void ui_build() {
   lv_obj_align(btn_close_nodedb, LV_ALIGN_BOTTOM_MID, 0, -UI::Layout::Padding);
   lv_obj_add_style(btn_close_nodedb, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_nodedb, [](lv_event_t *e) {
-      lv_obj_add_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN);
+      (void)e;
+      if (kb) lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+      navigate_to(7); // LoRa hub
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lbl_close_nodedb = lv_label_create(btn_close_nodedb);
-  lv_label_set_text(lbl_close_nodedb, LV_SYMBOL_CLOSE " CLOSE");
+  lv_label_set_text(lbl_close_nodedb, LV_SYMBOL_LEFT " BACK TO LORA");
   lv_obj_center(lbl_close_nodedb);
 
-  // --- LoRa Terminal Modal Panel ---
-  lora_log_panel = lv_obj_create(main_screen);
-  lv_obj_set_size(lora_log_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight);
-  lv_obj_align(lora_log_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  // --- LoRa Terminal Sub-Tab ---
   lv_obj_set_style_bg_color(lora_log_panel, lv_color_hex(UI::Colors::Background), 0);
   lv_obj_set_style_border_color(lora_log_panel, lv_color_hex(UI::Colors::Primary), 0); // Changed to Primary
   lv_obj_set_style_border_width(lora_log_panel, 2, 0);
-  lv_obj_add_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN);
   no_scroll(lora_log_panel);
   lv_obj_set_style_pad_all(lora_log_panel, 0, 0);
 
@@ -843,9 +842,11 @@ void ui_build() {
   lv_obj_set_flex_grow(btn_close_log, 1);
   lv_obj_add_style(btn_close_log, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_log, [](lv_event_t *e) {
-      lv_obj_add_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN);
+      (void)e;
+      if (kb) lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+      navigate_to(7); // LoRa hub
   }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_close_log = lv_label_create(btn_close_log); lv_label_set_text(lbl_close_log, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_log);
+  lv_obj_t *lbl_close_log = lv_label_create(btn_close_log); lv_label_set_text(lbl_close_log, LV_SYMBOL_LEFT " BACK"); lv_obj_center(lbl_close_log);
 
   lv_obj_t *btn_lora_clear = lv_btn_create(log_footer);
   lv_obj_set_size(btn_lora_clear, 0, UI::Layout::ButtonHeight);
@@ -860,14 +861,10 @@ void ui_build() {
   }, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lbl_lora_clear = lv_label_create(btn_lora_clear); lv_label_set_text(lbl_lora_clear, LV_SYMBOL_TRASH " CLEAR"); lv_obj_center(lbl_lora_clear);
 
-  // --- LoRa Chat Modal Panel ---
-  lora_chat_panel = lv_obj_create(main_screen);
-  lv_obj_set_size(lora_chat_panel, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight);
-  lv_obj_align(lora_chat_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+  // --- LoRa Chat Sub-Tab ---
   lv_obj_set_style_bg_color(lora_chat_panel, lv_color_hex(UI::Colors::Background), 0);
   lv_obj_set_style_border_color(lora_chat_panel, lv_color_hex(UI::Colors::Success), 0);
   lv_obj_set_style_border_width(lora_chat_panel, 2, 0);
-  lv_obj_add_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN);
   no_scroll(lora_chat_panel);
   lv_obj_set_style_pad_all(lora_chat_panel, 0, 0);
 
@@ -910,9 +907,11 @@ void ui_build() {
   lv_obj_set_flex_grow(btn_close_chat, 1);
   lv_obj_add_style(btn_close_chat, &style_btn_dark, 0);
   lv_obj_add_event_cb(btn_close_chat, [](lv_event_t *e) {
-      lv_obj_add_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN);
+      (void)e;
+      if (kb) lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+      navigate_to(7); // LoRa hub
   }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_close_chat = lv_label_create(btn_close_chat); lv_label_set_text(lbl_close_chat, LV_SYMBOL_CLOSE " CLOSE"); lv_obj_center(lbl_close_chat);
+  lv_obj_t *lbl_close_chat = lv_label_create(btn_close_chat); lv_label_set_text(lbl_close_chat, LV_SYMBOL_LEFT " BACK"); lv_obj_center(lbl_close_chat);
 
   lv_obj_t *btn_lora_chat_clear = lv_btn_create(chat_footer);
   lv_obj_set_size(btn_lora_chat_clear, 0, UI::Layout::ButtonHeight);
@@ -935,38 +934,36 @@ void ui_build() {
   lv_obj_set_grid_dsc_array(tab_lora, lora_col_dsc, lora_row_dsc);
 
   hub(tab_lora, LV_SYMBOL_FILE, "TERMINAL", 0, 0, [](lv_event_t*) {
-      if (lora_log_panel) lv_obj_clear_flag(lora_log_panel, LV_OBJ_FLAG_HIDDEN);
       if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
           g_app_context.lora.log_updated = true; // Force UI redraw when opened
           xSemaphoreGive(g_app_context.lora.mutex);
       }
+      navigate_to(15);
   }, 0x00AAFF);
 
   hub(tab_lora, LV_SYMBOL_LIST, "NODE DB", 1, 0, [](lv_event_t*) {
-      if (lora_nodedb_panel) {
-          lv_obj_clear_flag(lora_nodedb_panel, LV_OBJ_FLAG_HIDDEN);
-          if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-              g_app_context.lora.nodedb_updated = true;
-              xSemaphoreGive(g_app_context.lora.mutex);
-          }
+      if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+          g_app_context.lora.nodedb_updated = true;
+          xSemaphoreGive(g_app_context.lora.mutex);
       }
+      navigate_to(16);
   }, 0xFF00FF);
 
   hub(tab_lora, LV_SYMBOL_WIFI, "STATS", 0, 1, [](lv_event_t*) {
-      if (lora_stats_panel) lv_obj_clear_flag(lora_stats_panel, LV_OBJ_FLAG_HIDDEN);
       if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
           g_app_context.lora.stats.updated = true;
           xSemaphoreGive(g_app_context.lora.mutex);
       }
+      navigate_to(17);
   }, 0xFFFF00);
 
   hub(tab_lora, LV_SYMBOL_KEYBOARD, "CHAT", 1, 1, [](lv_event_t*) {
-      if (lora_chat_panel) lv_obj_clear_flag(lora_chat_panel, LV_OBJ_FLAG_HIDDEN);
       if (g_app_context.lora.mutex && xSemaphoreTake(g_app_context.lora.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
           g_app_context.lora.chat_updated = true;
           g_app_context.lora.unread_chat = false; // Mark as read
           xSemaphoreGive(g_app_context.lora.mutex);
       }
+      navigate_to(18);
   }, 0x00FF88);
 
   add_return_btn(tab_lora);
