@@ -800,6 +800,8 @@ void lora_service_task(void *pv) {
 
 static volatile bool pending_stop_all = false;
 static volatile int pending_nav_tab = -1;
+static volatile bool pending_stop_audit = true;
+static volatile bool pending_pause_scan = true;
 static volatile bool req_start_ble_adv_test = false;
 volatile bool req_stop_ble = false; // Make globally accessible to BLE background thread
 static volatile bool req_start_ble_scan = false;
@@ -816,6 +818,22 @@ void wait_for_idle() {
 void navigate_to(int tab) {
     // Request the state machine to safely tear down operations and navigate
     pending_nav_tab = tab;
+
+    // Default behavior: stop active operations when navigating.
+    pending_stop_audit = true;
+    pending_pause_scan = true;
+
+    // If a PMKID monitor is running, keep it active when leaving the Audit tab.
+    // The monitor is driven by an LVGL timer + WiFi promiscuous callback (or companion),
+    // and should not be coupled to which tab is currently visible.
+    if (g_app_context.audit.current_mode == AUDIT_PMKID && tab != 2) {
+        pending_stop_audit = false;
+        // When using the companion, allow the main scan loop to remain active.
+        if (g_app_context.audit.pmkid_via_companion) {
+            pending_pause_scan = false;
+        }
+    }
+
     pending_stop_all = true;
 }
 
@@ -1479,18 +1497,22 @@ void main_app_task(void *pvParameters) {
         if (pending_stop_all) {
             g_app_context.ui_busy = true;
             
-            stop_audit_action(&g_app_context);
+            if (pending_stop_audit) {
+                stop_audit_action(&g_app_context);
+            }
             stop_ble(&g_app_context);
             stop_pcap(&g_app_context);
             stop_probe_monitor(&g_app_context);
 
-            if (!g_app_context.wifi_scan.paused && g_app_context.wifi_scan.started) {
+            if (pending_pause_scan && !g_app_context.wifi_scan.paused && g_app_context.wifi_scan.started) {
                 g_app_context.wifi_scan.paused = true;
                 esp_wifi_set_promiscuous(false);
                 queue_local_ui_text(UI_EVT_SET_SCAN_PAUSE, LV_SYMBOL_PLAY " RESUME");
             }
 
             pending_stop_all = false;
+            pending_stop_audit = true;
+            pending_pause_scan = true;
 
             if (pending_nav_tab >= 0) {
                 LocalUiEvent ev = {};
