@@ -21,7 +21,8 @@ extern lv_obj_t *nodedb_list;
 extern lv_obj_t *lora_chat_panel;
 extern lv_obj_t *ta_lora_chat;
 extern lv_obj_t *lora_log_panel;
-extern lv_obj_t *ui_spinner;
+extern lv_obj_t *ui_passive_indicator;
+extern lv_obj_t *ui_reconnect_indicator;
 extern lv_obj_t *diagnostics_panel;
 extern lv_obj_t *ta_diagnostics;
 extern lv_obj_t *sys_stats_panel;
@@ -622,18 +623,30 @@ void ui_update_tick(lv_timer_t *timer) {
         }
     }
 
-    // Activity Spinner
-    if (ui_spinner) {
-        bool is_active = (ui_context->capture.pcap_active || ui_context->capture.probe_active || 
-                          ui_context->ble.scan_active || ui_context->ble.adv_test_active || 
-                          ui_context->audit.current_mode != AUDIT_NONE);
-        static int last_is_active = -1;
-        if ((int)is_active != last_is_active) {
-            // FIX: Hidden spinners STILL run animation timers and invalidate the screen. 
-            // We must pause the animation entirely when hidden.
-            if (is_active) { lv_obj_clear_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); }
-            else { lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); }
-            last_is_active = is_active;
+    // Activity indicators
+    if (ui_passive_indicator) {
+        const bool passive_active =
+            (ui_context->wifi_scan.started && !ui_context->wifi_scan.paused) ||
+            ui_context->capture.pcap_active ||
+            ui_context->capture.probe_active ||
+            ui_context->ble.scan_active ||
+            (ui_context->audit.current_mode == AUDIT_PMKID);
+
+        static int last_passive_active = -1;
+        if ((int)passive_active != last_passive_active) {
+            if (passive_active) { lv_obj_clear_flag(ui_passive_indicator, LV_OBJ_FLAG_HIDDEN); }
+            else { lv_obj_add_flag(ui_passive_indicator, LV_OBJ_FLAG_HIDDEN); }
+            last_passive_active = passive_active;
+        }
+    }
+
+    if (ui_reconnect_indicator) {
+        const bool reconnect_active = (ui_context->audit.current_mode == AUDIT_RECONNECT);
+        static int last_reconnect_active = -1;
+        if ((int)reconnect_active != last_reconnect_active) {
+            if (reconnect_active) { lv_obj_clear_flag(ui_reconnect_indicator, LV_OBJ_FLAG_HIDDEN); }
+            else { lv_obj_add_flag(ui_reconnect_indicator, LV_OBJ_FLAG_HIDDEN); }
+            last_reconnect_active = reconnect_active;
         }
     }
 

@@ -41,7 +41,8 @@ lv_obj_t *ta_lora_chat = nullptr;
 lv_obj_t *ta_lora_chat_input = nullptr;
 lv_obj_t *lora_log_panel = nullptr;
 lv_obj_t *temp_warning_border = nullptr;
-lv_obj_t *ui_spinner = nullptr;
+lv_obj_t *ui_passive_indicator = nullptr;
+lv_obj_t *ui_reconnect_indicator = nullptr;
 lv_obj_t *lbl_gps_data = nullptr;
 lv_obj_t *lbl_pcap_status = nullptr; // Corrected to be a single declaration
 lv_obj_t *low_batt_border = nullptr;
@@ -282,10 +283,18 @@ void ui_build() {
   lv_obj_set_style_text_color(title, lv_color_hex(UI::Colors::Primary), 0);
   lv_obj_align(title, LV_ALIGN_LEFT_MID, 2, 0);
 
-  ui_spinner = lv_spinner_create(status_bar, 1000, 60);
-  lv_obj_set_size(ui_spinner, 16, 16);
-  lv_obj_align(ui_spinner, LV_ALIGN_LEFT_MID, 22, 0);
-  lv_obj_add_flag(ui_spinner, LV_OBJ_FLAG_HIDDEN); // Hidden by default
+  // Activity indicators (kept lightweight: labels instead of animated spinners)
+  ui_passive_indicator = lv_label_create(status_bar);
+  lv_label_set_text(ui_passive_indicator, LV_SYMBOL_EYE_OPEN);
+  lv_obj_set_style_text_color(ui_passive_indicator, lv_color_hex(UI::Colors::Primary), 0);
+  lv_obj_align(ui_passive_indicator, LV_ALIGN_LEFT_MID, 22, 0);
+  lv_obj_add_flag(ui_passive_indicator, LV_OBJ_FLAG_HIDDEN);
+
+  ui_reconnect_indicator = lv_label_create(status_bar);
+  lv_label_set_text(ui_reconnect_indicator, LV_SYMBOL_REFRESH);
+  lv_obj_set_style_text_color(ui_reconnect_indicator, lv_color_hex(UI::Colors::Error), 0);
+  lv_obj_align(ui_reconnect_indicator, LV_ALIGN_LEFT_MID, 42, 0);
+  lv_obj_add_flag(ui_reconnect_indicator, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_t *icont=lv_obj_create(status_bar);
   lv_obj_set_size(icont, 200, 24); lv_obj_align(icont, LV_ALIGN_RIGHT_MID, 0, 0);
