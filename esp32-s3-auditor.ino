@@ -37,6 +37,7 @@
 #include "audit_actions.h"
 #include "ble_tasks.h"
 #include "pcap_and_probes.h"
+#include "companion_link.h"
 #include "ui_events.h"
 #include "src/UIConfig.h" // For UI::Colors
 
@@ -71,6 +72,7 @@ extern lv_obj_t *tabview;
 //             Diagnostics & Tracing
 // ──────────────────────────────────────────────
 static SemaphoreHandle_t g_diagMutex = nullptr;
+SemaphoreHandle_t g_i2cMutex = nullptr;
 
 static char g_lastStateCore0[96] = "boot";
 static char g_lastStateCore1[96] = "boot";
@@ -925,18 +927,22 @@ void cb_start_beacon(lv_event_t*) {
 
 void cb_start_pmkid(lv_event_t*) {
     if (g_app_context.wifi_scan.selected_net < 0) return; // Corrected access
-    if (g_app_context.capture.pcap_active || g_app_context.capture.probe_active) {
+    const bool use_companion = companion_probe();
+    if (!use_companion && (g_app_context.capture.pcap_active || g_app_context.capture.probe_active)) {
         lv_label_set_text(lbl_audit_status, "#FF4444 Stop PCAP/Probes first#");
         return;
     }
     if (g_app_context.audit.current_mode != AUDIT_NONE) stop_audit_action(&g_app_context);
 
-    // Pause scan and stop promiscuous before swapping callbacks
-    g_app_context.wifi_scan.paused = true;
-    esp_wifi_set_promiscuous(false);
-    WiFi.scanDelete();
+    // Local PMKID monitoring requires channel lock + callback swap; pause scan first.
+    if (!use_companion) {
+        g_app_context.wifi_scan.paused = true;
+        esp_wifi_set_promiscuous(false);
+        WiFi.scanDelete();
+    }
 
     g_app_context.audit.pmkid_found = false;
+    g_app_context.audit.pmkid_via_companion = use_companion;
     memset(g_app_context.audit.pmkid_value, 0, sizeof(g_app_context.audit.pmkid_value));
     memset(g_app_context.audit.pmkid_sta_mac, 0, sizeof(g_app_context.audit.pmkid_sta_mac));
     memset(g_app_context.audit.pmkid_target_ssid, 0, sizeof(g_app_context.audit.pmkid_target_ssid));
@@ -961,12 +967,27 @@ void cb_start_pmkid(lv_event_t*) {
     strncpy(g_app_context.audit.pmkid_target_ssid, target_ssid, sizeof(g_app_context.audit.pmkid_target_ssid) - 1);
     g_app_context.audit.pmkid_target_ssid[sizeof(g_app_context.audit.pmkid_target_ssid) - 1] = '\0';
 
-    set_promiscuous_channel(target_channel);
-    esp_wifi_set_promiscuous_rx_cb(pmkid_monitor_cb);
     g_app_context.audit.current_mode = AUDIT_PMKID;
     g_app_context.audit.audit_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
-    esp_wifi_set_promiscuous(true);
-    lv_label_set_text(lbl_audit_status, "#00AAFF PMKID MONITORING...#\nWaiting for handshake");
+
+    if (use_companion) {
+        // Use the companion MCU for PMKID monitoring so the main radio can keep scanning.
+        companion_stop_all();
+        companion_clear_result();
+        const bool ok = companion_set_target(target_channel, target_bssid) && companion_start_pmkid();
+        if (!ok) {
+            lv_label_set_text(lbl_audit_status, "#FF4444 Companion not responding#");
+            stop_audit_action(&g_app_context);
+            return;
+        }
+        lv_label_set_text(lbl_audit_status, "#00AAFF PMKID MONITORING (COMPANION)...#\nWaiting for handshake");
+    } else {
+        set_promiscuous_channel(target_channel);
+        esp_wifi_set_promiscuous_rx_cb(pmkid_monitor_cb);
+        esp_wifi_set_promiscuous(true);
+        lv_label_set_text(lbl_audit_status, "#00AAFF PMKID MONITORING...#\nWaiting for handshake");
+    }
+
     lv_obj_add_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
@@ -1298,6 +1319,7 @@ void setup() {
     delay(2000); 
     
     g_diagMutex = xSemaphoreCreateMutex();
+    g_i2cMutex = xSemaphoreCreateMutex();
     if (g_diagMutex) set_last_state_fmt("setup start");
     print_crash_recovery_banner();
 

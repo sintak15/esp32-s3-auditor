@@ -5,6 +5,7 @@
 #include "sd_logger.h"
 #include "wifi_frames.h"
 #include "pcap_and_probes.h"
+#include "companion_link.h"
 #include <esp_wifi.h>
 #include <nvs_flash.h>
 
@@ -70,12 +71,19 @@ void stop_audit_action(AppContext* context) {
         context->audit.audit_timer = nullptr;
     }
     if (context->audit.current_mode == AUDIT_PMKID) {
-        // Restore main callback used for STA discovery + PCAP/probe monitoring.
-        esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+        if (context->audit.pmkid_via_companion) {
+            companion_stop_all();
+        } else {
+            // Restore main callback used for STA discovery + PCAP/probe monitoring.
+            esp_wifi_set_promiscuous_rx_cb(&wifi_promiscuous_cb);
+        }
     }
     context->audit.current_mode = AUDIT_NONE;
+    context->audit.pmkid_via_companion = false;
     context->wifi_scan.paused = false;
-    esp_wifi_set_promiscuous(false);
+    if (!context->capture.pcap_active && !context->capture.probe_active) {
+        esp_wifi_set_promiscuous(false);
+    }
     lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
     show_audit_buttons(context->wifi_scan.selected_net >= 0 || context->wifi_scan.reconnect_sta_target >= 0);
 }
@@ -171,6 +179,27 @@ void beacon_tick(lv_timer_t *timer) {
 void pmkid_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
+
+    if (context->audit.pmkid_via_companion && !context->audit.pmkid_found) {
+        static uint8_t fail_count = 0;
+
+        CompanionStatus st = {};
+        if (!companion_read_status(&st)) {
+            fail_count++;
+            if (fail_count >= 3) {
+                lv_label_set_text(lbl_audit_status, "#FF4444 Companion not responding#");
+                stop_audit_action(context);
+            }
+            return;
+        }
+
+        fail_count = 0;
+        if (st.pmkid_found) {
+            memcpy(context->audit.pmkid_value, st.pmkid, sizeof(context->audit.pmkid_value));
+            memcpy(context->audit.pmkid_sta_mac, st.sta_mac, sizeof(context->audit.pmkid_sta_mac));
+            context->audit.pmkid_found = true;
+        }
+    }
 
     if (context->audit.pmkid_found) {
         if (sd_card_ready()) {

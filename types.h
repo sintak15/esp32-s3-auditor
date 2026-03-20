@@ -114,6 +114,7 @@ struct AuditState {
   lv_timer_t* audit_timer;
   int beacon_idx;
   bool pmkid_found;
+  bool pmkid_via_companion;
   char pmkid_target_ssid[33];
   uint8_t pmkid_value[16];
   uint8_t pmkid_sta_mac[6];

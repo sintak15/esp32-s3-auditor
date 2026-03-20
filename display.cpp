@@ -5,6 +5,8 @@
 #include <Wire.h>
 #include <esp_heap_caps.h>
 
+extern SemaphoreHandle_t g_i2cMutex;
+
 static uint8_t g_user_backlight = 255;
 static bool g_screen_dimmed = false;
 
@@ -81,18 +83,27 @@ TouchPoint get_touch() {
     // ISOLATION TEST 2: Uncomment to stub touch completely
     // return pt;
 
+    bool locked = false;
+    if (g_i2cMutex) {
+        locked = (xSemaphoreTake(g_i2cMutex, pdMS_TO_TICKS(15)) == pdTRUE);
+        if (!locked) return pt;
+    }
+
     Wire.beginTransmission(TOUCH_ADDR);
     Wire.write(0x02);
-    if (Wire.endTransmission() != 0) return pt;
-    Wire.requestFrom(TOUCH_ADDR, (uint8_t)5);
-    if (Wire.available() == 5) {
-        uint8_t t = Wire.read(), xh = Wire.read(), xl = Wire.read(), yh = Wire.read(), yl = Wire.read();
-        if (t > 0 && t < 3) {
-            pt.pressed = true;
-            pt.x = constrain(((uint16_t)(xh & 0x0F) << 8) | xl, 0, SCREEN_W);
-            pt.y = constrain(((uint16_t)(yh & 0x0F) << 8) | yl, 0, SCREEN_H);
+    if (Wire.endTransmission() == 0) {
+        Wire.requestFrom(TOUCH_ADDR, (uint8_t)5);
+        if (Wire.available() == 5) {
+            uint8_t t = Wire.read(), xh = Wire.read(), xl = Wire.read(), yh = Wire.read(), yl = Wire.read();
+            if (t > 0 && t < 3) {
+                pt.pressed = true;
+                pt.x = constrain(((uint16_t)(xh & 0x0F) << 8) | xl, 0, SCREEN_W);
+                pt.y = constrain(((uint16_t)(yh & 0x0F) << 8) | yl, 0, SCREEN_H);
+            }
         }
     }
+
+    if (locked && g_i2cMutex) xSemaphoreGive(g_i2cMutex);
     return pt;
 }
 
