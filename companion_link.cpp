@@ -9,10 +9,7 @@ extern SemaphoreHandle_t g_i2cMutex;
 static constexpr uint8_t  COMPANION_ADDR = 0x42;
 static constexpr uint8_t  PROTO_VERSION  = 1;
 static constexpr uint32_t PROBE_INTERVAL_MS = 2000;
-// Only the first ~34 bytes are used by the main firmware today. Requesting fewer bytes
-// improves reliability on shared I2C buses (touch + companion) and reduces timeouts
-// under load.
-static constexpr size_t   STATUS_LEN = 34;
+static constexpr size_t   STATUS_LEN = 64;
 static constexpr uint32_t PRESENT_GRACE_MS = 6000;
 
 enum CompanionCmd : uint8_t {
