@@ -1,4 +1,5 @@
 #include "companion_link.h"
+#include "constants.h"
 
 #include <Wire.h>
 #include <freertos/semphr.h>
@@ -26,6 +27,7 @@ enum CompanionCmd : uint8_t {
 static bool g_present = false;
 static uint32_t g_last_probe_ms = 0;
 static uint32_t g_last_ok_ms = 0;
+static size_t g_last_read_len = 0;
 
 static bool i2c_lock(uint32_t timeout_ms) {
   if (!g_i2cMutex) return true;
@@ -41,6 +43,7 @@ static bool read_status_frame(uint8_t out[STATUS_LEN]) {
   if (!i2c_lock(60)) return false;
 
   bool ok = false;
+  g_last_read_len = 0;
   for (int attempt = 0; attempt < 2 && !ok; attempt++) {
     memset(out, 0, STATUS_LEN);
     Wire.requestFrom((int)COMPANION_ADDR, (int)STATUS_LEN);
@@ -49,6 +52,7 @@ static bool read_status_frame(uint8_t out[STATUS_LEN]) {
     while (Wire.available() && i < STATUS_LEN) {
       out[i++] = (uint8_t)Wire.read();
     }
+    g_last_read_len = i;
 
     ok = (i == STATUS_LEN &&
           out[0] == 'C' &&
@@ -76,6 +80,16 @@ static bool write_cmd(uint8_t cmd, const uint8_t* payload, size_t payload_len) {
   return rc == 0;
 }
 
+static bool ping_addr(uint8_t addr, uint8_t* out_rc) {
+  if (out_rc) *out_rc = 0xFF;
+  if (!i2c_lock(60)) return false;
+  Wire.beginTransmission(addr);
+  uint8_t rc = Wire.endTransmission(true);
+  i2c_unlock();
+  if (out_rc) *out_rc = rc;
+  return true;
+}
+
 bool companion_probe() {
   const uint32_t now = millis();
   if (now - g_last_probe_ms < PROBE_INTERVAL_MS) return g_present;
@@ -93,6 +107,22 @@ bool companion_probe() {
 
 bool companion_present() {
   return g_present;
+}
+
+size_t companion_status_len() {
+  return STATUS_LEN;
+}
+
+size_t companion_last_read_len() {
+  return g_last_read_len;
+}
+
+bool companion_ping(uint8_t* out_rc) {
+  return ping_addr(COMPANION_ADDR, out_rc);
+}
+
+bool companion_touch_ping(uint8_t* out_rc) {
+  return ping_addr(TOUCH_ADDR, out_rc);
 }
 
 bool companion_read_status(CompanionStatus* out) {

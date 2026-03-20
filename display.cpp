@@ -180,7 +180,9 @@ void display_init() {
     delay(50);
 
     Wire.begin(I2C_SDA, I2C_SCL, 100000);
-    Wire.setTimeOut(20); // Prevent hardware I2C bus noise from permanently hanging the UI core
+    // Balance bus reliability (touch + companion link) with UI responsiveness.
+    // Short timeouts cause false negatives when the companion is busy; long timeouts can slow the UI if wiring is noisy.
+    Wire.setTimeOut(60);
 
     // Spin up the background I2C touch polling task away from the LVGL render core
     xTaskCreatePinnedToCore(touch_service_task, "touch_task", 2048, NULL, 2, NULL, 0);

@@ -110,39 +110,67 @@ static void companion_status_tick(lv_timer_t *t) {
   char buf[540];
   const uint32_t age_ok_ms = g_companion_last_ok_ms ? (now - g_companion_last_ok_ms) : 0xFFFFFFFFu;
   if (!ok) {
+    const size_t want = companion_status_len();
+    const size_t got = companion_last_read_len();
+    uint8_t rc_comp = 0xFF;
+    uint8_t rc_touch = 0xFF;
+    const bool ping_comp = companion_ping(&rc_comp);
+    const bool ping_touch = companion_touch_ping(&rc_touch);
+    const char* bus_line = nullptr;
+    char bus_buf[64];
+    if (!ping_comp || !ping_touch) {
+      bus_line = "Bus: busy";
+    } else {
+      snprintf(bus_buf, sizeof(bus_buf), "Bus: touch rc=%u  companion rc=%u",
+               (unsigned)rc_touch, (unsigned)rc_comp);
+      bus_line = bus_buf;
+    }
+
     const bool seen_recently = (g_companion_last_ok_ms && age_ok_ms <= 6000);
     if (seen_recently) {
       snprintf(buf, sizeof(buf),
                "#FFAA00 Link: updating#\n"
                "I2C: SDA=%d SCL=%d addr=0x42\n"
                "Touch: addr=0x%02X (same bus)\n"
+               "%s\n"
+               "Read: %u/%u bytes\n"
                "Last OK: %lus ago\n"
                "\n"
                "Tip: if this persists, confirm SDA/SCL/GND\n"
                "and that the companion is powered.",
                I2C_SDA, I2C_SCL, TOUCH_ADDR,
+               bus_line,
+               (unsigned)got, (unsigned)want,
                (unsigned long)(age_ok_ms / 1000));
     } else if (g_companion_last_ok_ms) {
       snprintf(buf, sizeof(buf),
                "#FF4444 Link: unavailable#\n"
                "I2C: SDA=%d SCL=%d addr=0x42\n"
                "Touch: addr=0x%02X (same bus)\n"
+               "%s\n"
+               "Read: %u/%u bytes\n"
                "Last OK: %lus ago\n"
                "\n"
                "Tip: confirm SDA/SCL/GND and that the\n"
                "companion is powered.",
                I2C_SDA, I2C_SCL, TOUCH_ADDR,
+               bus_line,
+               (unsigned)got, (unsigned)want,
                (unsigned long)(age_ok_ms / 1000));
     } else {
       snprintf(buf, sizeof(buf),
                "#FFAA00 Link: waiting#\n"
                "I2C: SDA=%d SCL=%d addr=0x42\n"
                "Touch: addr=0x%02X (same bus)\n"
+               "%s\n"
+               "Read: %u/%u bytes\n"
                "Last OK: never\n"
                "\n"
                "Tip: confirm SDA/SCL/GND and that the\n"
                "companion is powered.",
-               I2C_SDA, I2C_SCL, TOUCH_ADDR);
+               I2C_SDA, I2C_SCL, TOUCH_ADDR,
+               bus_line,
+               (unsigned)got, (unsigned)want);
     }
     lv_label_set_text(lbl_companion_status, buf);
     return;
