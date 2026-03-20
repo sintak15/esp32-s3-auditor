@@ -838,6 +838,8 @@ void navigate_to(int tab) {
         if (g_app_context.audit.pmkid_via_companion) {
             pending_pause_scan = false;
         }
+    } else if (g_app_context.audit.current_mode == AUDIT_RECONNECT) {
+        pending_stop_audit = false;
     }
 
     // BLE advertisement test is not passive; stop it on navigation.
