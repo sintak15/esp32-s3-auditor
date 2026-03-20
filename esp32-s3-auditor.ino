@@ -19,6 +19,7 @@
 #include <mbedtls/sha256.h>
 #include <driver/temperature_sensor.h>
 #include <sys/time.h> // For settimeofday()
+#include <esp_log.h>
 
 #include <pb_encode.h>
 #include <pb_decode.h>
@@ -1346,6 +1347,9 @@ void setup() {
 
     // Let USB CDC host connect before printing crash report
     delay(2000); 
+
+    // Silence extremely chatty WiFi driver logs (e.g. repeated "unsupported frame type").
+    esp_log_level_set("wifi", ESP_LOG_NONE);
     
     g_diagMutex = xSemaphoreCreateMutex();
     g_i2cMutex = xSemaphoreCreateMutex();
@@ -1652,6 +1656,7 @@ void main_app_task(void *pvParameters) {
             perf_chan_hop.print_and_reset("process_channel_hop");
             perf_lora.print_and_reset("lora_service_task");
             perf_web.print_and_reset("web_server");
+            audit_actions_print_and_reset_perf();
             Serial.println("--------------------------------------\n");
         }
 

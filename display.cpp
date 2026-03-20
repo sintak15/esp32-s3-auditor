@@ -616,7 +616,7 @@ void ui_update_tick(lv_timer_t *timer) {
             ui_context->capture.pcap_active ||
             ui_context->capture.probe_active ||
             ui_context->ble.scan_active ||
-            (ui_context->audit.current_mode == AUDIT_PMKID);
+            (ui_context->audit.current_mode & AUDIT_PMKID);
 
         static int last_passive_active = -1;
         if ((int)passive_active != last_passive_active) {
@@ -627,7 +627,7 @@ void ui_update_tick(lv_timer_t *timer) {
     }
 
     if (ui_reconnect_indicator) {
-        const bool reconnect_active = (ui_context->audit.current_mode == AUDIT_RECONNECT);
+        const bool reconnect_active = (ui_context->audit.current_mode & AUDIT_RECONNECT);
         static int last_reconnect_active = -1;
         if ((int)reconnect_active != last_reconnect_active) {
             if (reconnect_active) { lv_obj_clear_flag(ui_reconnect_indicator, LV_OBJ_FLAG_HIDDEN); }

@@ -21,3 +21,6 @@ void IRAM_ATTR pmkid_monitor_cb(void *buf, wifi_promiscuous_pkt_type_t type);
 
 // Helper: randomize the STA MAC (use responsibly)
 void randomize_wifi_mac();
+
+// Debug/perf: aggregate tick timings (printed by main diagnostics loop)
+void audit_actions_print_and_reset_perf();

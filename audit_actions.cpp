@@ -15,6 +15,45 @@ extern lv_obj_t *lbl_audit_status;
 
 static AppContext* audit_context = nullptr;
 
+struct TickPerf {
+    uint32_t call_count = 0;
+    uint64_t total_us = 0;
+    uint32_t max_us = 0;
+    uint32_t min_us = 0xFFFFFFFFu;
+
+    void record(uint32_t us) {
+        call_count++;
+        total_us += us;
+        if (us > max_us) max_us = us;
+        if (us < min_us) min_us = us;
+    }
+
+    void print_and_reset(const char* name) {
+        if (call_count == 0) return;
+        const uint32_t avg_us = (uint32_t)(total_us / call_count);
+        Serial.printf("[AUDIT-PERF] %-18s | calls:%-5lu avg:%-6luus min:%-6luus max:%-6luus\n",
+                      name,
+                      (unsigned long)call_count,
+                      (unsigned long)avg_us,
+                      (unsigned long)(min_us == 0xFFFFFFFFu ? 0 : min_us),
+                      (unsigned long)max_us);
+        call_count = 0;
+        total_us = 0;
+        max_us = 0;
+        min_us = 0xFFFFFFFFu;
+    }
+};
+
+static TickPerf perf_reconnect_tick;
+static TickPerf perf_reconnect_mutex_wait;
+static uint32_t perf_reconnect_mutex_fail = 0;
+
+static TickPerf perf_pmkid_tick;
+static uint32_t perf_pmkid_status_fail = 0;
+
+static volatile uint32_t perf_pmkid_cb_calls = 0;
+static volatile uint32_t perf_pmkid_cb_bssid_match = 0;
+
 // Safe wrapper: esp_wifi_80211_tx requires WIFI_IF_STA (interface 0) to be started.
 // If the interface isn't ready it returns ESP_ERR_INVALID_ARG and logs "invalid interface 0".
 // We verify the interface is up before every raw tx.
@@ -48,6 +87,31 @@ static uint8_t beacon_frame[128];
 
 void audit_actions_init(AppContext* context) {
     audit_context = context;
+}
+
+void audit_actions_print_and_reset_perf() {
+    perf_reconnect_tick.print_and_reset("reconnect_tick");
+    perf_reconnect_mutex_wait.print_and_reset("reconnect_mutex");
+    if (perf_reconnect_mutex_fail) {
+        Serial.printf("[AUDIT-PERF] reconnect_mutex_fail: %lu\n", (unsigned long)perf_reconnect_mutex_fail);
+        perf_reconnect_mutex_fail = 0;
+    }
+
+    perf_pmkid_tick.print_and_reset("pmkid_tick");
+    if (perf_pmkid_status_fail) {
+        Serial.printf("[AUDIT-PERF] pmkid_status_fail: %lu\n", (unsigned long)perf_pmkid_status_fail);
+        perf_pmkid_status_fail = 0;
+    }
+
+    const uint32_t cb_calls = perf_pmkid_cb_calls;
+    const uint32_t cb_match = perf_pmkid_cb_bssid_match;
+    perf_pmkid_cb_calls = 0;
+    perf_pmkid_cb_bssid_match = 0;
+    if (cb_calls || cb_match) {
+        Serial.printf("[AUDIT-PERF] pmkid_cb: calls=%lu bssid_match=%lu\n",
+                      (unsigned long)cb_calls,
+                      (unsigned long)cb_match);
+    }
 }
 
 void randomize_wifi_mac() {
@@ -99,6 +163,7 @@ void stop_audit_action(AppContext* context) {
 }
 
 void reconnect_tick(lv_timer_t *timer) {
+    const uint32_t tick_t0 = micros();
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
     int selectedNet = context->wifi_scan.selected_net;
@@ -122,7 +187,15 @@ void reconnect_tick(lv_timer_t *timer) {
     bool valid_ap = false;
     bool valid_sta = false;
 
-    if (context->wifi_scan.mutex && xSemaphoreTake(context->wifi_scan.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    bool got_mutex = false;
+    uint32_t mutex_wait_us = 0;
+    if (context->wifi_scan.mutex) {
+        const uint32_t m0 = micros();
+        got_mutex = (xSemaphoreTake(context->wifi_scan.mutex, pdMS_TO_TICKS(50)) == pdTRUE);
+        mutex_wait_us = micros() - m0;
+    }
+
+    if (context->wifi_scan.mutex && got_mutex) {
         if (selectedNet >= 0 && selectedNet < context->wifi_scan.ap_count) {
             memcpy(target_bssid, context->wifi_scan.ap_list[selectedNet].bssid, 6);
             target_channel = context->wifi_scan.ap_list[selectedNet].channel;
@@ -133,6 +206,11 @@ void reconnect_tick(lv_timer_t *timer) {
             valid_sta = true;
         }
         xSemaphoreGive(context->wifi_scan.mutex);
+    }
+
+    if (context->wifi_scan.mutex) {
+        perf_reconnect_mutex_wait.record(mutex_wait_us);
+        if (!got_mutex) perf_reconnect_mutex_fail++;
     }
 
     if (valid_ap) {
@@ -165,6 +243,8 @@ void reconnect_tick(lv_timer_t *timer) {
         memcpy(reconnect_buf + 10, bc, 6);
         wifi_tx(reconnect_buf, sizeof(reconnect_buf));
     }
+
+    perf_reconnect_tick.record(micros() - tick_t0);
 }
 
 void beacon_tick(lv_timer_t *timer) {
@@ -194,6 +274,7 @@ void beacon_tick(lv_timer_t *timer) {
 }
 
 void pmkid_tick(lv_timer_t *timer) {
+    const uint32_t tick_t0 = micros();
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
 
@@ -211,6 +292,7 @@ void pmkid_tick(lv_timer_t *timer) {
 
         CompanionStatus st = {};
         if (!companion_read_status(&st)) {
+            perf_pmkid_status_fail++;
             const uint32_t now = millis();
             if (last_ok_ms && (now - last_ok_ms) > 15000) {
                 lv_label_set_text(lbl_audit_status, "#FF4444 Companion link unavailable#");
@@ -269,6 +351,8 @@ void pmkid_tick(lv_timer_t *timer) {
             lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
         }
     }
+
+    perf_pmkid_tick.record(micros() - tick_t0);
 }
 
 static inline __attribute__((always_inline)) uint16_t read_be16(const uint8_t* p) {
@@ -326,6 +410,8 @@ static inline __attribute__((always_inline)) bool extract_pmkid_from_rsn_ie(cons
 void IRAM_ATTR pmkid_monitor_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!buf || !audit_context) return;
 
+    perf_pmkid_cb_calls++;
+
     AppContext* context = audit_context;
     if (!(context->audit.current_mode & AUDIT_PMKID)) return;
     if (context->audit.pmkid_found) return;
@@ -346,6 +432,7 @@ void IRAM_ATTR pmkid_monitor_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
 
     // Addr2 is BSSID for FromDS frames
     if (memcmp(frame + 10, context->audit.pmkid_target_bssid, 6) != 0) return;
+    perf_pmkid_cb_bssid_match++;
 
     size_t hdr_len = 24;
     const uint8_t subtype = (fc >> 4) & 0xF;

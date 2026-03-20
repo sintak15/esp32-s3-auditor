@@ -96,13 +96,23 @@ static void companion_status_tick(lv_timer_t *t) {
   (void)t;
   if (!tabview || !lbl_companion_status) return;
 
-  // Poll in the background so the "last OK" timestamp stays fresh even if the
-  // user leaves the menu while the companion is busy.
   const bool on_companion_tab = (lv_tabview_get_tab_act(tabview) == 19);
+
+  // Avoid heavy I2C reads while the tab is hidden. A simple ping keeps the "last OK"
+  // timestamp from going stale without contending with touch polling.
+  static uint32_t last_bg_ping_ms = 0;
+  const uint32_t now = millis();
+  if (!on_companion_tab) {
+    if (now - last_bg_ping_ms < 3000) return;
+    last_bg_ping_ms = now;
+
+    uint8_t rc = 0xFF;
+    if (companion_ping(&rc) && rc == 0) g_companion_last_ok_ms = now;
+    return;
+  }
 
   CompanionStatus st = {};
   const bool ok = companion_read_status(&st);
-  const uint32_t now = millis();
   if (ok) g_companion_last_ok_ms = now;
 
   // Only repaint the label while the tab is visible (keeps LVGL work minimal).
@@ -187,7 +197,7 @@ static void companion_status_tick(lv_timer_t *t) {
     hex_bytes(st.pmkid, sizeof(st.pmkid), pmkid_hex, sizeof(pmkid_hex));
   }
 
-  const bool main_pmkid = (g_app_context.audit.current_mode == AUDIT_PMKID);
+  const bool main_pmkid = (g_app_context.audit.current_mode & AUDIT_PMKID);
   const char* main_mode = "idle";
   char main_bssid[18] = "--:--:--:--:--:--";
   if (main_pmkid) {
