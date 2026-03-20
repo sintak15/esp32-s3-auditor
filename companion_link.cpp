@@ -8,7 +8,11 @@ extern SemaphoreHandle_t g_i2cMutex;
 static constexpr uint8_t  COMPANION_ADDR = 0x42;
 static constexpr uint8_t  PROTO_VERSION  = 1;
 static constexpr uint32_t PROBE_INTERVAL_MS = 2000;
-static constexpr size_t   STATUS_LEN = 64;
+// Only the first ~34 bytes are used by the main firmware today. Requesting fewer bytes
+// improves reliability on shared I2C buses (touch + companion) and reduces timeouts
+// under load.
+static constexpr size_t   STATUS_LEN = 34;
+static constexpr uint32_t PRESENT_GRACE_MS = 6000;
 
 enum CompanionCmd : uint8_t {
   CMD_GET_STATUS   = 0x01,
@@ -21,6 +25,7 @@ enum CompanionCmd : uint8_t {
 
 static bool g_present = false;
 static uint32_t g_last_probe_ms = 0;
+static uint32_t g_last_ok_ms = 0;
 
 static bool i2c_lock(uint32_t timeout_ms) {
   if (!g_i2cMutex) return true;
@@ -33,25 +38,36 @@ static void i2c_unlock() {
 }
 
 static bool read_status_frame(uint8_t out[STATUS_LEN]) {
-  memset(out, 0, STATUS_LEN);
+  if (!i2c_lock(60)) return false;
 
-  if (!i2c_lock(25)) return false;
-  Wire.requestFrom((int)COMPANION_ADDR, (int)STATUS_LEN);
+  bool ok = false;
+  for (int attempt = 0; attempt < 2 && !ok; attempt++) {
+    memset(out, 0, STATUS_LEN);
+    Wire.requestFrom((int)COMPANION_ADDR, (int)STATUS_LEN);
 
-  size_t i = 0;
-  while (Wire.available() && i < STATUS_LEN) {
-    out[i++] = (uint8_t)Wire.read();
+    size_t i = 0;
+    while (Wire.available() && i < STATUS_LEN) {
+      out[i++] = (uint8_t)Wire.read();
+    }
+
+    ok = (i == STATUS_LEN &&
+          out[0] == 'C' &&
+          out[1] == 'M' &&
+          out[2] == PROTO_VERSION);
+
+    if (!ok) {
+      // Flush any leftover bytes so the next request starts cleanly.
+      while (Wire.available()) (void)Wire.read();
+      delay(2);
+    }
   }
-  i2c_unlock();
 
-  if (i != STATUS_LEN) return false;
-  if (out[0] != 'C' || out[1] != 'M') return false;
-  if (out[2] != PROTO_VERSION) return false;
-  return true;
+  i2c_unlock();
+  return ok;
 }
 
 static bool write_cmd(uint8_t cmd, const uint8_t* payload, size_t payload_len) {
-  if (!i2c_lock(25)) return false;
+  if (!i2c_lock(60)) return false;
   Wire.beginTransmission(COMPANION_ADDR);
   Wire.write(cmd);
   if (payload && payload_len) Wire.write(payload, payload_len);
@@ -66,7 +82,12 @@ bool companion_probe() {
   g_last_probe_ms = now;
 
   uint8_t frame[STATUS_LEN];
-  g_present = read_status_frame(frame);
+  if (read_status_frame(frame)) {
+    g_present = true;
+    g_last_ok_ms = now;
+  } else if (g_last_ok_ms && (now - g_last_ok_ms) > PRESENT_GRACE_MS) {
+    g_present = false;
+  }
   return g_present;
 }
 
@@ -79,11 +100,13 @@ bool companion_read_status(CompanionStatus* out) {
 
   uint8_t frame[STATUS_LEN];
   if (!read_status_frame(frame)) {
-    g_present = false;
+    const uint32_t now = millis();
+    if (g_last_ok_ms && (now - g_last_ok_ms) > PRESENT_GRACE_MS) g_present = false;
     return false;
   }
 
   g_present = true;
+  g_last_ok_ms = millis();
 
   const uint8_t flags = frame[3];
   out->present = true;
@@ -118,4 +141,3 @@ bool companion_stop_all() {
 bool companion_clear_result() {
   return write_cmd(CMD_CLEAR_RESULT, nullptr, 0);
 }
-

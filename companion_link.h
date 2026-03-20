@@ -22,7 +22,7 @@ bool companion_probe();
 // Returns the last known presence state (may be stale until companion_probe()).
 bool companion_present();
 
-// Read the latest 64-byte status frame from the companion.
+// Read the latest status frame from the companion.
 // Returns false if the device is not responding or the frame is invalid.
 bool companion_read_status(CompanionStatus* out);
 
@@ -31,4 +31,3 @@ bool companion_set_target(uint8_t channel, const uint8_t bssid[6]);
 bool companion_start_pmkid();
 bool companion_stop_all();
 bool companion_clear_result();
-

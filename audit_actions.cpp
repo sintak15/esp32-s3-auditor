@@ -181,19 +181,26 @@ void pmkid_tick(lv_timer_t *timer) {
     if (!context) return;
 
     if (context->audit.pmkid_via_companion && !context->audit.pmkid_found) {
-        static uint8_t fail_count = 0;
+        static lv_timer_t* last_timer = nullptr;
+        static uint32_t last_ok_ms = 0;
+        if (timer != last_timer) {
+            last_timer = timer;
+            // Treat session start as "OK recently" so brief I2C contention doesn't
+            // immediately end the audit.
+            last_ok_ms = millis();
+        }
 
         CompanionStatus st = {};
         if (!companion_read_status(&st)) {
-            fail_count++;
-            if (fail_count >= 3) {
-                lv_label_set_text(lbl_audit_status, "#FF4444 Companion not responding#");
+            const uint32_t now = millis();
+            if (last_ok_ms && (now - last_ok_ms) > 15000) {
+                lv_label_set_text(lbl_audit_status, "#FF4444 Companion link unavailable#");
                 stop_audit_action(context);
             }
             return;
         }
 
-        fail_count = 0;
+        last_ok_ms = millis();
         if (st.pmkid_found) {
             memcpy(context->audit.pmkid_value, st.pmkid, sizeof(context->audit.pmkid_value));
             memcpy(context->audit.pmkid_sta_mac, st.sta_mac, sizeof(context->audit.pmkid_sta_mac));

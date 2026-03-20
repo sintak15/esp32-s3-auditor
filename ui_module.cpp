@@ -94,19 +94,37 @@ static void hex_bytes(const uint8_t *bytes, size_t n, char *out, size_t out_len)
 static void companion_status_tick(lv_timer_t *t) {
   (void)t;
   if (!tabview || !lbl_companion_status) return;
-  // Tab indices are stable because all submenu tabs are appended in ui_build.
-  if (lv_tabview_get_tab_act(tabview) != 19) return;
+
+  // Poll in the background so the "last OK" timestamp stays fresh even if the
+  // user leaves the menu while the companion is busy.
+  const bool on_companion_tab = (lv_tabview_get_tab_act(tabview) == 19);
 
   CompanionStatus st = {};
   const bool ok = companion_read_status(&st);
   const uint32_t now = millis();
   if (ok) g_companion_last_ok_ms = now;
 
+  // Only repaint the label while the tab is visible (keeps LVGL work minimal).
+  if (!on_companion_tab) return;
+
   char buf[540];
+  const uint32_t age_ok_ms = g_companion_last_ok_ms ? (now - g_companion_last_ok_ms) : 0xFFFFFFFFu;
   if (!ok) {
-    if (g_companion_last_ok_ms) {
+    const bool seen_recently = (g_companion_last_ok_ms && age_ok_ms <= 6000);
+    if (seen_recently) {
       snprintf(buf, sizeof(buf),
-               "#FF4444 Link: not detected#\n"
+               "#FFAA00 Link: updating#\n"
+               "I2C: SDA=%d SCL=%d addr=0x42\n"
+               "Touch: addr=0x%02X (same bus)\n"
+               "Last OK: %lus ago\n"
+               "\n"
+               "Tip: if this persists, confirm SDA/SCL/GND\n"
+               "and that the companion is powered.",
+               I2C_SDA, I2C_SCL, TOUCH_ADDR,
+               (unsigned long)(age_ok_ms / 1000));
+    } else if (g_companion_last_ok_ms) {
+      snprintf(buf, sizeof(buf),
+               "#FF4444 Link: unavailable#\n"
                "I2C: SDA=%d SCL=%d addr=0x42\n"
                "Touch: addr=0x%02X (same bus)\n"
                "Last OK: %lus ago\n"
@@ -114,10 +132,10 @@ static void companion_status_tick(lv_timer_t *t) {
                "Tip: confirm SDA/SCL/GND and that the\n"
                "companion is powered.",
                I2C_SDA, I2C_SCL, TOUCH_ADDR,
-               (unsigned long)((now - g_companion_last_ok_ms) / 1000));
+               (unsigned long)(age_ok_ms / 1000));
     } else {
       snprintf(buf, sizeof(buf),
-               "#FF4444 Link: not detected#\n"
+               "#FFAA00 Link: waiting#\n"
                "I2C: SDA=%d SCL=%d addr=0x42\n"
                "Touch: addr=0x%02X (same bus)\n"
                "Last OK: never\n"
@@ -149,7 +167,7 @@ static void companion_status_tick(lv_timer_t *t) {
            "PMKID: %s\n"
            "STA: %s\n"
            "\n"
-           "#666666 Updates every ~1s while open.#",
+           "#666666 Updates about once per second.#",
            (unsigned)st.proto_version,
            st.monitor_active ? "active" : "idle",
            st.target_set ? "set" : "none",
