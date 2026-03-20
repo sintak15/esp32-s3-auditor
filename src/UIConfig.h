@@ -31,7 +31,7 @@ namespace UI {
         static const int CornerRadius   = 4;  // Uniform rounding for buttons/panels
         
         // Header/Footer heights
-        static const int HeaderHeight   = 28;
+        static const int HeaderHeight   = 32;
         static const int FooterHeight   = 22;
 
         // Control Sizing

@@ -86,9 +86,13 @@ void init_btn_style(lv_style_t *s, uint32_t bg, uint32_t border) {
 lv_obj_t* make_action_btn(lv_obj_t *parent, const char *label, lv_style_t *style,
                         uint32_t tc, lv_event_cb_t cb, int y) {
   lv_obj_t *b = lv_btn_create(parent); 
+  lv_obj_set_size(b, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
   lv_obj_align(b, LV_ALIGN_TOP_MID, 0, y); lv_obj_add_style(b, style, 0);
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *l=lv_label_create(b); lv_label_set_text(l, label);
+  lv_obj_set_width(l, lv_pct(100));
+  lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(l, lv_color_hex(tc), 0); lv_obj_center(l);
   lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
   return b;
@@ -114,7 +118,7 @@ void ui_build() {
 
   // ── Status Bar ────────────────────────────────
   status_bar=lv_obj_create(main_screen);
-  lv_obj_set_size(status_bar, SCREEN_W, 32); lv_obj_set_pos(status_bar, 0, 0);
+  lv_obj_set_size(status_bar, SCREEN_W, UI::Layout::HeaderHeight); lv_obj_set_pos(status_bar, 0, 0);
   lv_obj_set_style_bg_color(status_bar, lv_color_hex(UI::Colors::Background), 0);
   lv_obj_set_style_border_width(status_bar, 0, 0);
   lv_obj_set_style_radius(status_bar, 0, 0);
@@ -153,7 +157,7 @@ void ui_build() {
 
   // ── Tabview ───────────────────────────────────
   tabview=lv_tabview_create(main_screen, LV_DIR_TOP, 0);
-  lv_obj_set_size(tabview, SCREEN_W, SCREEN_H-32);
+  lv_obj_set_size(tabview, SCREEN_W, SCREEN_H - UI::Layout::HeaderHeight);
   lv_obj_align(tabview, LV_ALIGN_BOTTOM_LEFT, 0, 0);
   lv_obj_set_style_bg_color(tabview, lv_color_hex(0x000000), 0);
   
