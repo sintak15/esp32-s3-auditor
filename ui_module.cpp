@@ -6,6 +6,7 @@
 #include "types.h" // Includes constants.h indirectly
 #include "constants.h" // Explicitly include constants.h for MAX_BEACON_SSIDS etc.
 #include "display.h"
+#include "companion_link.h"
 
 // Global AppContext instance (defined in main .ino file)
 extern AppContext g_app_context;
@@ -47,6 +48,8 @@ lv_obj_t *low_batt_border = nullptr;
 lv_obj_t *battery_stats_panel = nullptr;
 lv_obj_t *reboot_panel = nullptr;
 lv_obj_t *brightness_panel = nullptr;
+lv_obj_t *companion_panel = nullptr;
+lv_obj_t *lbl_companion_status = nullptr;
 lv_obj_t *lbl_battery_stats = nullptr;
 lv_obj_t *ui_battery_chart = nullptr;
 lv_chart_series_t *ui_battery_series = nullptr;
@@ -67,6 +70,96 @@ extern void reboot_cyd();
 
 lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
            style_btn_blue, style_view_active, style_view_inactive;
+
+static uint32_t g_companion_last_ok_ms = 0;
+
+static void fmt_mac6(const uint8_t mac[6], char out[18]) {
+  snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static void hex_bytes(const uint8_t *bytes, size_t n, char *out, size_t out_len) {
+  if (!out || out_len == 0) return;
+  const size_t need = n * 2 + 1;
+  if (out_len < need) {
+    out[0] = '\0';
+    return;
+  }
+  for (size_t i = 0; i < n; i++) {
+    snprintf(out + i * 2, out_len - i * 2, "%02x", bytes[i]);
+  }
+  out[n * 2] = '\0';
+}
+
+static void companion_status_tick(lv_timer_t *t) {
+  (void)t;
+  if (!tabview || !lbl_companion_status) return;
+  // Tab indices are stable because all submenu tabs are appended in ui_build.
+  if (lv_tabview_get_tab_act(tabview) != 19) return;
+
+  CompanionStatus st = {};
+  const bool ok = companion_read_status(&st);
+  const uint32_t now = millis();
+  if (ok) g_companion_last_ok_ms = now;
+
+  char buf[540];
+  if (!ok) {
+    if (g_companion_last_ok_ms) {
+      snprintf(buf, sizeof(buf),
+               "#FF4444 Link: not detected#\n"
+               "I2C: SDA=%d SCL=%d addr=0x42\n"
+               "Touch: addr=0x%02X (same bus)\n"
+               "Last OK: %lus ago\n"
+               "\n"
+               "Tip: confirm SDA/SCL/GND and that the\n"
+               "companion is powered.",
+               I2C_SDA, I2C_SCL, TOUCH_ADDR,
+               (unsigned long)((now - g_companion_last_ok_ms) / 1000));
+    } else {
+      snprintf(buf, sizeof(buf),
+               "#FF4444 Link: not detected#\n"
+               "I2C: SDA=%d SCL=%d addr=0x42\n"
+               "Touch: addr=0x%02X (same bus)\n"
+               "Last OK: never\n"
+               "\n"
+               "Tip: confirm SDA/SCL/GND and that the\n"
+               "companion is powered.",
+               I2C_SDA, I2C_SCL, TOUCH_ADDR);
+    }
+    lv_label_set_text(lbl_companion_status, buf);
+    return;
+  }
+
+  char bssid[18] = "--:--:--:--:--:--";
+  char sta[18] = "--:--:--:--:--:--";
+  char pmkid_hex[33] = {0};
+
+  fmt_mac6(st.target_bssid, bssid);
+  fmt_mac6(st.sta_mac, sta);
+  if (st.pmkid_found) {
+    hex_bytes(st.pmkid, sizeof(st.pmkid), pmkid_hex, sizeof(pmkid_hex));
+  }
+
+  snprintf(buf, sizeof(buf),
+           "#00FF88 Link: OK#  proto:%u\n"
+           "Monitor: %s\n"
+           "Target: %s  ch:%u\n"
+           "BSSID: %s\n"
+           "RSSI: %d dBm\n"
+           "PMKID: %s\n"
+           "STA: %s\n"
+           "\n"
+           "#666666 Updates every ~1s while open.#",
+           (unsigned)st.proto_version,
+           st.monitor_active ? "active" : "idle",
+           st.target_set ? "set" : "none",
+           (unsigned)st.channel,
+           bssid,
+           (int)st.last_rssi,
+           st.pmkid_found ? pmkid_hex : "--",
+           st.pmkid_found ? sta : "--");
+  lv_label_set_text(lbl_companion_status, buf);
+}
 
 void no_scroll(lv_obj_t *o) {
   lv_obj_set_scrollbar_mode(o, LV_SCROLLBAR_MODE_OFF);
@@ -193,10 +286,11 @@ void ui_build() {
   lora_nodedb_panel  = lv_tabview_add_tab(tabview, "LoRaNodes"); // Index 16
   lora_stats_panel   = lv_tabview_add_tab(tabview, "LoRaStats"); // Index 17
   lora_chat_panel    = lv_tabview_add_tab(tabview, "LoRaChat");  // Index 18
+  companion_panel    = lv_tabview_add_tab(tabview, "Comp");      // Index 19
   
   lv_obj_t *all_tabs[]={tab_home,tab_scan,tab_audit,tab_ble,tab_pcap,tab_probes,tab_settings,tab_lora,tab_gps,
                         beacon_ssid_panel, diagnostics_panel, sys_stats_panel, battery_stats_panel, reboot_panel, brightness_panel,
-                        lora_log_panel, lora_nodedb_panel, lora_stats_panel, lora_chat_panel,
+                        lora_log_panel, lora_nodedb_panel, lora_stats_panel, lora_chat_panel, companion_panel,
                         tv_cont};
   for (int i=0; i<sizeof(all_tabs)/sizeof(all_tabs[0]); i++) no_scroll(all_tabs[i]);
 
@@ -469,6 +563,7 @@ void ui_build() {
   hub(tab_settings, LV_SYMBOL_EYE_OPEN,  "BRIGHT",   0, 2, [](lv_event_t*){ navigate_to(14); }, UI::Colors::Warning);
   hub(tab_settings, LV_SYMBOL_POWER,     "REBOOT",   1, 2, [](lv_event_t*){ navigate_to(13); }, UI::Colors::Error);
   hub(tab_settings, LV_SYMBOL_HOME,      "HOME",     0, 3, cb_nav_home,                          UI::Colors::Primary);
+  hub(tab_settings, LV_SYMBOL_USB,       "COMPANION",1, 3, [](lv_event_t*){ navigate_to(19); }, 0x00AAFF);
 
   // --- Beacon SSID Sub-Tab ---
   lv_obj_set_style_bg_color(beacon_ssid_panel, lv_color_hex(0x050505), 0);
@@ -732,6 +827,29 @@ void ui_build() {
   }, LV_EVENT_VALUE_CHANGED, lbl_bright_value);
 
   add_settings_back_btn(brightness_panel);
+
+  // --- Companion Sub-Tab ---
+  lv_obj_set_style_bg_color(companion_panel, lv_color_hex(UI::Colors::Background), 0);
+  lv_obj_set_style_border_color(companion_panel, lv_color_hex(0x00AAFF), 0);
+  lv_obj_set_style_border_width(companion_panel, 2, 0);
+  lv_obj_set_style_pad_all(companion_panel, 0, 0);
+  no_scroll(companion_panel);
+
+  lv_obj_t *lbl_comp_title = lv_label_create(companion_panel);
+  lv_label_set_text(lbl_comp_title, "#00AAFF " LV_SYMBOL_USB " COMPANION LINK#");
+  lv_label_set_recolor(lbl_comp_title, true);
+  lv_obj_align(lbl_comp_title, LV_ALIGN_TOP_MID, 0, 0);
+
+  lbl_companion_status = lv_label_create(companion_panel);
+  lv_label_set_recolor(lbl_companion_status, true);
+  lv_label_set_long_mode(lbl_companion_status, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_font(lbl_companion_status, &lv_font_montserrat_14, 0);
+  lv_obj_set_width(lbl_companion_status, SCREEN_W - (UI::Layout::Margin * 2));
+  lv_obj_align(lbl_companion_status, LV_ALIGN_TOP_LEFT, UI::Layout::Margin, 30);
+  lv_label_set_text(lbl_companion_status, "#888888 Waiting for status...#");
+
+  add_settings_back_btn(companion_panel);
+  lv_timer_create(companion_status_tick, 1000, nullptr);
 
   // --- LoRa Stats Sub-Tab ---
   lv_obj_set_style_bg_color(lora_stats_panel, lv_color_hex(UI::Colors::Background), 0);
