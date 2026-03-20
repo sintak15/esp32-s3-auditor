@@ -48,7 +48,7 @@ void run_ap_scan(AppContext *ctx) {
     if (!ctx) return;
     // CRITICAL: Cannot scan while promiscuous mode is enabled, it will crash the ESP32
     esp_wifi_set_promiscuous(false);
-    WiFi.scanNetworks(true); // async scan
+    WiFi.scanNetworks(true, false, true); // async passive scan
 }
 
 // Helper to add/update STA records - Marked IRAM_ATTR for safe calling from promiscuous callback
@@ -390,7 +390,13 @@ void scan_tick(lv_timer_t *timer) {
                 WiFi.scanDelete();
             }
 
-            if (millis() - ctx->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS) {
+            const bool allow_ap_scan =
+                !ctx->capture.pcap_active &&
+                !ctx->capture.probe_active &&
+                (ctx->audit.current_mode == AUDIT_NONE ||
+                 (ctx->audit.current_mode == AUDIT_PMKID && ctx->audit.pmkid_via_companion));
+
+            if (allow_ap_scan && (millis() - ctx->wifi_scan.last_scan_ms > AP_SCAN_INTERVAL_MS)) {
                 run_ap_scan(ctx);
                 ctx->wifi_scan.last_scan_ms = millis();
             }

@@ -802,6 +802,9 @@ static volatile bool pending_stop_all = false;
 static volatile int pending_nav_tab = -1;
 static volatile bool pending_stop_audit = true;
 static volatile bool pending_pause_scan = true;
+static volatile bool pending_stop_ble = true;
+static volatile bool pending_stop_pcap = true;
+static volatile bool pending_stop_probe = true;
 static volatile bool req_start_ble_adv_test = false;
 volatile bool req_stop_ble = false; // Make globally accessible to BLE background thread
 static volatile bool req_start_ble_scan = false;
@@ -819,9 +822,12 @@ void navigate_to(int tab) {
     // Request the state machine to safely tear down operations and navigate
     pending_nav_tab = tab;
 
-    // Default behavior: stop active operations when navigating.
+    // Default behavior: only stop active/non-passive operations when navigating.
     pending_stop_audit = true;
-    pending_pause_scan = true;
+    pending_pause_scan = false;
+    pending_stop_ble = false;
+    pending_stop_pcap = false;
+    pending_stop_probe = false;
 
     // If a PMKID monitor is running, keep it active when leaving the Audit tab.
     // The monitor is driven by an LVGL timer + WiFi promiscuous callback (or companion),
@@ -832,6 +838,11 @@ void navigate_to(int tab) {
         if (g_app_context.audit.pmkid_via_companion) {
             pending_pause_scan = false;
         }
+    }
+
+    // BLE advertisement test is not passive; stop it on navigation.
+    if (g_app_context.ble.adv_test_active) {
+        pending_stop_ble = true;
     }
 
     pending_stop_all = true;
@@ -1504,19 +1515,33 @@ void main_app_task(void *pvParameters) {
             if (pending_stop_audit) {
                 stop_audit_action(&g_app_context);
             }
-            stop_ble(&g_app_context);
-            stop_pcap(&g_app_context);
-            stop_probe_monitor(&g_app_context);
+            if (pending_stop_ble) {
+                stop_ble(&g_app_context);
+            }
+            if (pending_stop_pcap) {
+                stop_pcap(&g_app_context);
+            }
+            if (pending_stop_probe) {
+                stop_probe_monitor(&g_app_context);
+            }
 
             if (pending_pause_scan && !g_app_context.wifi_scan.paused && g_app_context.wifi_scan.started) {
                 g_app_context.wifi_scan.paused = true;
-                esp_wifi_set_promiscuous(false);
+                // Only disable promiscuous if nothing else is using it.
+                if (!g_app_context.capture.pcap_active &&
+                    !g_app_context.capture.probe_active &&
+                    !(g_app_context.audit.current_mode == AUDIT_PMKID && !g_app_context.audit.pmkid_via_companion)) {
+                    esp_wifi_set_promiscuous(false);
+                }
                 queue_local_ui_text(UI_EVT_SET_SCAN_PAUSE, LV_SYMBOL_PLAY " RESUME");
             }
 
             pending_stop_all = false;
             pending_stop_audit = true;
-            pending_pause_scan = true;
+            pending_pause_scan = false;
+            pending_stop_ble = true;
+            pending_stop_pcap = true;
+            pending_stop_probe = true;
 
             if (pending_nav_tab >= 0) {
                 LocalUiEvent ev = {};
