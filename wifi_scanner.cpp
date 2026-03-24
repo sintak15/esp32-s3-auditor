@@ -237,7 +237,7 @@ void render_scan_list(AppContext *ctx) {
                 snprintf(txt, sizeof(txt), "%s (%ddBm)", mac, ctx->wifi_scan.sta_list[i].rssi);
 
                 // No meaningful click action here, but keep callback harmless.
-                set_item(slot, LV_SYMBOL_BLUETOOTH, txt, (intptr_t)i);
+                set_item(slot, LV_SYMBOL_RIGHT, txt, (intptr_t)i);
                 slot++;
             }
 

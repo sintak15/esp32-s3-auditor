@@ -389,15 +389,6 @@ static void write_status_snapshot(bool sdMounted, int batteryPct, bool isChargin
     }
 }
 
-void reset_battery_calibration() {
-    nvs_handle_t nvs;
-    if (nvs_open("storage", NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_erase_key(nvs, "batt_max");
-        nvs_commit(nvs);
-        nvs_close(nvs);
-    }
-    g_app_context.status.calibrated_max_mv = 4050; // Reset to safe default
-}
 
 void load_battery_calibration() {
     nvs_handle_t nvs;
@@ -434,9 +425,7 @@ void status_service_task(void *pv) {
         uint32_t raw_mv = (raw_sum / 10) * 2; // Standard 1:2 divider calculation
 
         // Exponential Moving Average (EMA) low-pass filter to prevent flickering
-        // Increased threshold to 130mV to allow natural voltage relaxation (sag) 
-        // when unplugging to be smoothed by the filter instead of jumping instantly.
-        if (filtered_mv == 0.0f || abs((int32_t)raw_mv - (int32_t)filtered_mv) > 130) {
+        if (filtered_mv == 0.0f) {
             filtered_mv = (float)raw_mv; 
         } else {
             filtered_mv = (alpha * (float)raw_mv) + ((1.0f - alpha) * filtered_mv);

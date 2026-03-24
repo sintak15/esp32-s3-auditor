@@ -65,6 +65,8 @@ const AuditMode AUDIT_NONE = 0;
 const AuditMode AUDIT_RECONNECT = 1 << 0;
 const AuditMode AUDIT_BEACON    = 1 << 1;
 const AuditMode AUDIT_PMKID     = 1 << 2;
+const AuditMode AUDIT_DEAUTH_FLOOD    = 1 << 3;
+const AuditMode AUDIT_BEACON_FLOOD = 1 << 4;
 
 
 // Custom struct for MAC addresses to avoid String overhead in std::set

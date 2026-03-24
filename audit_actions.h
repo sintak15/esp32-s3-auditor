@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include "types.h" // Changed from state.h to types.h
 #include <esp_wifi_types.h>
+#include "wifi_attacks.h"
 
 void audit_actions_init(AppContext* context);
 void stop_audit_action(AppContext* context);
@@ -24,3 +25,6 @@ void randomize_wifi_mac();
 
 // Debug/perf: aggregate tick timings (printed by main diagnostics loop)
 void audit_actions_print_and_reset_perf();
+
+void start_deauth_flood_action(AppContext* context);
+void start_beacon_flood_action(AppContext* context);
