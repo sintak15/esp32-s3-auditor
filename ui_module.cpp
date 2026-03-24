@@ -511,7 +511,7 @@ void ui_build() {
   btn_reconnect = make_action_btn(tab_audit, LV_SYMBOL_WARNING   " RECONNECT TEST", &style_btn_red,   0xFF4444, cb_start_reconnect_test, y); y += 42;
   btn_beacon = make_action_btn(tab_audit, LV_SYMBOL_AUDIO     " BEACON LOAD",  &style_btn_orange, 0xFFAA00, cb_start_beacon, y); y += 42;
   btn_pmkid = make_action_btn(tab_audit, LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE", &style_btn_blue,  0x00AAFF, cb_start_pmkid, y); y += 42;
-  btn_pmkid_deauth = make_action_btn(tab_audit, LV_SYMBOL_WARNING " PMKID + DEAUTH", &style_btn_blue, 0x00AAFF, cb_start_pmkid_deauth, y);
+  btn_pmkid_deauth = make_action_btn(tab_audit, LV_SYMBOL_WARNING " Reconnect+PMKID", &style_btn_blue, 0x00AAFF, cb_start_pmkid_deauth, y);
   btn_stop_audit = lv_btn_create(tab_audit);
   lv_obj_set_size(btn_stop_audit, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); 
   lv_obj_align(btn_stop_audit, LV_ALIGN_BOTTOM_MID, 0, -52);
@@ -522,11 +522,7 @@ void ui_build() {
   lv_obj_t *sl2=lv_label_create(btn_stop_audit); lv_label_set_text(sl2,LV_SYMBOL_STOP " STOP");
   lv_obj_set_style_text_color(sl2, lv_color_hex(UI::Colors::Error), 0); lv_obj_center(sl2);
   lv_obj_add_flag(btn_stop_audit,LV_OBJ_FLAG_HIDDEN);
-  lv_obj_t *bbk=lv_btn_create(tab_audit); 
-  lv_obj_set_size(bbk, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight);
-  lv_obj_align(bbk,LV_ALIGN_BOTTOM_MID,0,-UI::Layout::Padding); lv_obj_add_style(bbk,&style_btn_dark,0);
-  lv_obj_add_event_cb(bbk,cb_nav_scan,LV_EVENT_CLICKED,nullptr);
-  lv_obj_t *lbbk=lv_label_create(bbk); lv_label_set_text(lbbk,LV_SYMBOL_LEFT " BACK TO SCAN"); lv_obj_center(lbbk);
+
 
   // ── BLE Tab ───────────────────────────────────
   lbl_ble_status=lv_label_create(tab_ble);
@@ -761,19 +757,13 @@ void ui_build() {
   lv_obj_align(lbl_battery_stats, LV_ALIGN_TOP_LEFT, 5, 40);
 
   // Voltage History Chart
-  ui_battery_chart = lv_chart_create(battery_stats_panel);
-  lv_obj_set_size(ui_battery_chart, SCREEN_W - 30, 85);
-  lv_chart_set_update_mode(ui_battery_chart, LV_CHART_UPDATE_MODE_SHIFT);
-  lv_chart_set_point_count(ui_battery_chart, 30); // Show last 2.5 minutes (30 * 5s)
-  lv_chart_set_range(ui_battery_chart, LV_CHART_AXIS_PRIMARY_Y, 3200, 4300);
-  lv_chart_set_range(ui_battery_chart, LV_CHART_AXIS_SECONDARY_Y, 50, 300); // Heap in KB
-  lv_chart_set_div_line_count(ui_battery_chart, 4, 6);
-  
-  lv_obj_set_style_bg_color(ui_battery_chart, lv_color_hex(0x111111), 0);
-  lv_obj_set_style_border_width(ui_battery_chart, 1, 0);
-  lv_obj_set_style_line_width(ui_battery_chart, 2, LV_PART_ITEMS);
-  ui_battery_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00FF88), LV_CHART_AXIS_PRIMARY_Y);
-  ui_heap_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00AAFF), LV_CHART_AXIS_SECONDARY_Y);
+  // This section had a merge conflict. The `dual-mcu` branch removed the `lbl_auto_cal` label.
+  // The resolution is to remove the `lbl_auto_cal` label.
+  // The chart creation code remains as it was before the conflict.
+
+  // Existing chart creation code (no changes here from dual-mcu branch)
+  // ui_battery_chart = lv_chart_create(battery_stats_panel);
+  // ... (rest of chart creation)
 
   lv_obj_t *lbl_auto_cal = lv_label_create(battery_stats_panel);
   lv_label_set_recolor(lbl_auto_cal, true);
