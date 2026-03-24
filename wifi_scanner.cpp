@@ -48,7 +48,7 @@ void run_ap_scan(AppContext *ctx) {
     if (!ctx) return;
     // CRITICAL: Cannot scan while promiscuous mode is enabled, it will crash the ESP32
     esp_wifi_set_promiscuous(false);
-    WiFi.scanNetworks(true, false, true); // async passive scan
+    WiFi.scanNetworks(true, false, false); // async active scan
 }
 
 // Helper to add/update STA records - Marked IRAM_ATTR for safe calling from promiscuous callback

@@ -27,7 +27,7 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
     int8_t rssi = pkt->rx_ctrl.rssi;
 
     // 1. Client (STA) Discovery - Resolve "sta and linked never populate"
-    if (type == WIFI_PKT_DATA && len >= 24) {
+    if ((type == WIFI_PKT_DATA || type == WIFI_PKT_MGMT) && len >= 24) {
         uint8_t *mac_addr = nullptr;
         uint8_t *ap_bssid = nullptr;
         bool has_ap = false;
@@ -42,6 +42,11 @@ void IRAM_ATTR wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
             mac_addr = frame + 4; ap_bssid = frame + 10; has_ap = true;
         } else if (!to_ds && !from_ds) { // Ad-hoc/Direct: Addr2=SA
             mac_addr = frame + 10;
+            // For management frames in an infrastructure BSS, Addr3 is the BSSID.
+            if (type == WIFI_PKT_MGMT && len >= 24) {
+                ap_bssid = frame + 16;
+                has_ap = true;
+            }
         }
 
         if (mac_addr) {

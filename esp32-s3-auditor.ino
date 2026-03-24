@@ -960,20 +960,15 @@ void cb_start_pmkid(lv_event_t*) {
 
     CompanionStatus cst = {};
     const bool use_companion = companion_read_status(&cst);
-    if (!use_companion && (g_app_context.capture.pcap_active || g_app_context.capture.probe_active)) {
-        lv_label_set_text(lbl_audit_status, "#FF4444 Stop PCAP/Probes first#");
+
+    // Enforce companion-only PMKID sniffing
+    if (!use_companion) {
+        lv_label_set_text(lbl_audit_status, "#FF4444 Companion not found#");
         return;
     }
 
-    // Local PMKID monitoring requires channel lock + callback swap; pause scan first.
-    if (!use_companion) {
-        g_app_context.wifi_scan.paused = true;
-        esp_wifi_set_promiscuous(false);
-        WiFi.scanDelete();
-    }
-
     g_app_context.audit.pmkid_found = false;
-    g_app_context.audit.pmkid_via_companion = use_companion;
+    g_app_context.audit.pmkid_via_companion = true; // Always true now
     memset(g_app_context.audit.pmkid_value, 0, sizeof(g_app_context.audit.pmkid_value));
     memset(g_app_context.audit.pmkid_sta_mac, 0, sizeof(g_app_context.audit.pmkid_sta_mac));
     memset(g_app_context.audit.pmkid_target_ssid, 0, sizeof(g_app_context.audit.pmkid_target_ssid));
@@ -1002,23 +997,16 @@ void cb_start_pmkid(lv_event_t*) {
     g_app_context.audit.current_mode |= AUDIT_PMKID;
     g_app_context.audit.pmkid_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
 
-    if (use_companion) {
-        // Use the companion MCU for PMKID monitoring so the main radio can keep scanning.
-        companion_stop_all();
-        companion_clear_result();
-        const bool ok = companion_set_target(target_channel, target_bssid) && companion_start_pmkid();
-        if (!ok) {
-            lv_label_set_text(lbl_audit_status, "#FF4444 Companion not responding#");
-            stop_audit_action(&g_app_context);
-            return;
-        }
-        lv_label_set_text(lbl_audit_status, "#00AAFF PMKID MONITORING (COMPANION)...#\nWaiting for handshake");
-    } else {
-        set_promiscuous_channel(target_channel);
-        esp_wifi_set_promiscuous_rx_cb(pmkid_monitor_cb);
-        esp_wifi_set_promiscuous(true);
-        lv_label_set_text(lbl_audit_status, "#00AAFF PMKID MONITORING...#\nWaiting for handshake");
+    // Use the companion MCU for PMKID monitoring so the main radio can keep scanning.
+    companion_stop_all();
+    companion_clear_result();
+    const bool ok = companion_set_target(target_channel, target_bssid) && companion_start_pmkid();
+    if (!ok) {
+        lv_label_set_text(lbl_audit_status, "#FF4444 Companion not responding#");
+        stop_audit_action(&g_app_context);
+        return;
     }
+    lv_label_set_text(lbl_audit_status, "#00AAFF PMKID MONITORING (COMPANION)...#\nWaiting for handshake");
 
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
