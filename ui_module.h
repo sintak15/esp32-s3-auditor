@@ -28,10 +28,6 @@ extern lv_obj_t *lbl_ota_progress;
 extern lv_obj_t *btn_ble_adv_test;
 extern lv_obj_t *btn_pcap_start;
 extern lv_obj_t *btn_probe_start;
-extern lv_obj_t *lbl_reset_cal_button; // Make the label for the reset button globally accessible
-
-// New externs for the confirmation dialog
-extern lv_obj_t *confirm_reset_panel;
 
 extern lv_style_t style_btn_dark, style_btn_red, style_btn_orange,
                   style_btn_blue, style_view_active, style_view_inactive;

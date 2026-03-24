@@ -10,7 +10,6 @@
 
 // Global AppContext instance (defined in main .ino file)
 extern AppContext g_app_context;
-extern void reset_battery_calibration();
 
 // Instantiate UI Handles
 lv_obj_t *main_screen, *status_bar, *tabview;
@@ -54,10 +53,6 @@ lv_obj_t *lbl_companion_status = nullptr;
 lv_obj_t *lbl_battery_stats = nullptr;
 lv_obj_t *ui_battery_chart = nullptr;
 lv_chart_series_t *ui_battery_series = nullptr;
-lv_obj_t *lbl_reset_cal_button = nullptr; // Globally define the label for the reset button
-
-// Confirmation dialog elements
-lv_obj_t *confirm_reset_panel = nullptr;
 lv_chart_series_t *ui_heap_series = nullptr;
 
 lv_obj_t *beacon_ssid_panel = nullptr;
@@ -780,67 +775,15 @@ void ui_build() {
   ui_battery_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00FF88), LV_CHART_AXIS_PRIMARY_Y);
   ui_heap_series = lv_chart_add_series(ui_battery_chart, lv_color_hex(0x00AAFF), LV_CHART_AXIS_SECONDARY_Y);
 
-  lv_obj_t *btn_reset_cal = lv_btn_create(battery_stats_panel);
-  lv_obj_set_size(btn_reset_cal, SCREEN_W - (UI::Layout::Margin * 2), 30);
-  lv_obj_align(btn_reset_cal, LV_ALIGN_BOTTOM_MID, 0, -50);
-  lv_obj_add_style(btn_reset_cal, &style_btn_dark, 0);
-  // When the reset button is clicked, show the confirmation dialog
-  lv_obj_add_event_cb(btn_reset_cal, [](lv_event_t *e) {
-      if (confirm_reset_panel) {
-          lv_obj_clear_flag(confirm_reset_panel, LV_OBJ_FLAG_HIDDEN);
-      }
-  }, LV_EVENT_CLICKED, nullptr);
-  lbl_reset_cal_button = lv_label_create(btn_reset_cal); lv_label_set_text(lbl_reset_cal_button, "RESET CALIBRATION"); lv_obj_center(lbl_reset_cal_button);
+  lv_obj_t *lbl_auto_cal = lv_label_create(battery_stats_panel);
+  lv_label_set_recolor(lbl_auto_cal, true);
+  lv_label_set_text(lbl_auto_cal, "#888888 Calibration auto-learns from charge cycles.#");
+  lv_obj_set_width(lbl_auto_cal, SCREEN_W - (UI::Layout::Margin * 2));
+  lv_label_set_long_mode(lbl_auto_cal, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(lbl_auto_cal, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(lbl_auto_cal, LV_ALIGN_BOTTOM_MID, 0, -50);
 
   add_settings_back_btn(battery_stats_panel);
-
-  // ── Confirmation Dialog for Reset Calibration ──
-  confirm_reset_panel = lv_obj_create(battery_stats_panel);
-  lv_obj_set_size(confirm_reset_panel, SCREEN_W - 40, 120); // Smaller panel
-  lv_obj_center(confirm_reset_panel);
-  lv_obj_set_style_bg_color(confirm_reset_panel, lv_color_hex(0x300000), 0); // Dark red background for emphasis
-  lv_obj_set_style_bg_opa(confirm_reset_panel, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_color(confirm_reset_panel, lv_color_hex(UI::Colors::Warning), 0);
-  lv_obj_set_style_border_width(confirm_reset_panel, 2, 0);
-  lv_obj_set_style_radius(confirm_reset_panel, UI::Layout::CornerRadius, 0);
-  lv_obj_set_style_pad_all(confirm_reset_panel, UI::Layout::Padding, 0);
-  lv_obj_add_flag(confirm_reset_panel, LV_OBJ_FLAG_HIDDEN); // Hidden by default
-  no_scroll(confirm_reset_panel);
-
-  lv_obj_t *lbl_confirm_msg = lv_label_create(confirm_reset_panel);
-  lv_label_set_text(lbl_confirm_msg, "#FF4444 Are you sure?#\n#AAAAAA This cannot be undone.#");
-  lv_label_set_recolor(lbl_confirm_msg, true);
-  lv_obj_align(lbl_confirm_msg, LV_ALIGN_TOP_MID, 0, 5);
-
-  // Yes button
-  int btn_width = (SCREEN_W - 40 - UI::Layout::Padding * 3) / 2;
-  lv_obj_t *btn_confirm_yes = lv_btn_create(confirm_reset_panel);
-  lv_obj_set_size(btn_confirm_yes, btn_width, UI::Layout::ButtonHeight);
-  lv_obj_align(btn_confirm_yes, LV_ALIGN_BOTTOM_LEFT, UI::Layout::Padding, -UI::Layout::Padding);
-  lv_obj_add_style(btn_confirm_yes, &style_btn_red, 0);
-  lv_obj_add_event_cb(btn_confirm_yes, [](lv_event_t *e) {
-      reset_battery_calibration();
-      lv_label_set_text(lbl_reset_cal_button, LV_SYMBOL_REFRESH " CALIBRATION CLEARED");
-      
-      // Revert text after 3 seconds
-      lv_timer_t * t = lv_timer_create([](lv_timer_t * timer) {
-          lv_label_set_text((lv_obj_t*)timer->user_data, "RESET CALIBRATION");
-          lv_timer_del(timer);
-      }, 3000, lbl_reset_cal_button);
-
-      lv_obj_add_flag(confirm_reset_panel, LV_OBJ_FLAG_HIDDEN);
-  }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_yes = lv_label_create(btn_confirm_yes); lv_label_set_text(lbl_yes, LV_SYMBOL_OK " YES"); lv_obj_center(lbl_yes);
-
-  // No button
-  lv_obj_t *btn_confirm_no = lv_btn_create(confirm_reset_panel);
-  lv_obj_set_size(btn_confirm_no, btn_width, UI::Layout::ButtonHeight);
-  lv_obj_align(btn_confirm_no, LV_ALIGN_BOTTOM_RIGHT, -UI::Layout::Padding, -UI::Layout::Padding);
-  lv_obj_add_style(btn_confirm_no, &style_btn_dark, 0);
-  lv_obj_add_event_cb(btn_confirm_no, [](lv_event_t *e) {
-      lv_obj_add_flag(confirm_reset_panel, LV_OBJ_FLAG_HIDDEN);
-  }, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lbl_no = lv_label_create(btn_confirm_no); lv_label_set_text(lbl_no, LV_SYMBOL_CLOSE " NO"); lv_obj_center(lbl_no);
 
   // --- Reboot Sub-Tab ---
   lv_obj_set_style_bg_color(reboot_panel, lv_color_hex(UI::Colors::Background), 0);

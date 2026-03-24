@@ -389,16 +389,6 @@ static void write_status_snapshot(bool sdMounted, int batteryPct, bool isChargin
     }
 }
 
-void reset_battery_calibration() {
-    nvs_handle_t nvs;
-    if (nvs_open("storage", NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_erase_key(nvs, "batt_max");
-        nvs_commit(nvs);
-        nvs_close(nvs);
-    }
-    g_app_context.status.calibrated_max_mv = 4050; // Reset to safe default
-}
-
 void load_battery_calibration() {
     nvs_handle_t nvs;
     g_app_context.status.calibrated_max_mv = 4050; // default
@@ -407,12 +397,23 @@ void load_battery_calibration() {
         if (nvs_get_u32(nvs, "batt_max", &val) == ESP_OK) g_app_context.status.calibrated_max_mv = val;
         nvs_close(nvs);
     }
+    g_app_context.status.calibrated_max_mv = constrain(g_app_context.status.calibrated_max_mv, 4000u, 4200u);
 }
 
 void status_service_task(void *pv) {
     uint32_t sd_retry_ms = 0;
     static float filtered_mv = 0.0f;
-    const float alpha = 0.10f; // Increased damping for more stable percentage
+    static float filtered_pct = -1.0f;
+    static bool charging_state = false;
+    static uint32_t power_transition_ms = 0;
+
+    const uint32_t charge_on_mv = 4180;   // USB attach threshold
+    const uint32_t charge_off_mv = 4090;  // USB detach threshold (hysteresis)
+    const uint32_t transition_window_ms = 6000;
+    const float mv_alpha_normal = 0.12f;
+    const float mv_alpha_transition = 0.035f;
+    const float pct_alpha_normal = 0.16f;
+    const float pct_alpha_transition = 0.05f;
 
     // Configure ADC attenuation for the full 0-3.1V range
     // On S3-CYD models, the battery pin is GPIO 1 (GPIO 4 is LCD_DC)
@@ -430,44 +431,51 @@ void status_service_task(void *pv) {
     for (;;) {
         // Use factory-calibrated millivolts reading with multi-sampling pre-filter
         uint32_t raw_sum = 0;
-        for(int i=0; i<10; i++) raw_sum += analogReadMilliVolts(BATT_ADC);
+        for (int i = 0; i < 10; i++) raw_sum += analogReadMilliVolts(BATT_ADC);
         uint32_t raw_mv = (raw_sum / 10) * 2; // Standard 1:2 divider calculation
 
-        // Exponential Moving Average (EMA) low-pass filter to prevent flickering
-        // Increased threshold to 130mV to allow natural voltage relaxation (sag) 
-        // when unplugging to be smoothed by the filter instead of jumping instantly.
-        if (filtered_mv == 0.0f || abs((int32_t)raw_mv - (int32_t)filtered_mv) > 130) {
-            filtered_mv = (float)raw_mv; 
-        } else {
-            filtered_mv = (alpha * (float)raw_mv) + ((1.0f - alpha) * filtered_mv);
+        // Charging detection with hysteresis avoids state flapping near threshold.
+        bool charging = charging_state ? (raw_mv > charge_off_mv) : (raw_mv > charge_on_mv);
+        if (charging != charging_state) {
+            charging_state = charging;
+            power_transition_ms = millis();
         }
 
-        uint32_t mv = (uint32_t)filtered_mv;
+        const bool in_transition = (power_transition_ms != 0) &&
+                                   (millis() - power_transition_ms < transition_window_ms);
+
+        // Always smooth voltage; use stronger damping around power-source transitions.
+        const float mv_alpha = in_transition ? mv_alpha_transition : mv_alpha_normal;
+        if (filtered_mv == 0.0f) {
+            filtered_mv = (float)raw_mv;
+        } else {
+            filtered_mv += ((float)raw_mv - filtered_mv) * mv_alpha;
+        }
+        uint32_t mv = (uint32_t)(filtered_mv + 0.5f);
 
         // Learned Accuracy Logic:
-        // If we are charging and seeing a stable voltage higher than our current 100% mark, 
-        // but within sane Li-ion limits (4.0V - 4.4V), update the calibration.
-        if (mv > 4130 && mv < 4400) {
-            if (mv > g_app_context.status.calibrated_max_mv + 10) {
-                g_app_context.status.calibrated_max_mv = mv;
+        // During charging, learn a better 100% point once rails have settled.
+        if (charging_state && !in_transition) {
+            uint32_t learn_mv = constrain(mv, 4000u, 4200u);
+            if (learn_mv > g_app_context.status.calibrated_max_mv + 5) {
+                g_app_context.status.calibrated_max_mv = learn_mv;
                 // Save to NVS
                 nvs_handle_t nvs;
                 if (nvs_open("storage", NVS_READWRITE, &nvs) == ESP_OK) {
-                    nvs_set_u32(nvs, "batt_max", mv);
+                    nvs_set_u32(nvs, "batt_max", learn_mv);
                     nvs_commit(nvs);
                     nvs_close(nvs);
                 }
             }
         }
         
-        // Calculate percentage locally with strict clamping to 0-100
-        // Now uses the learned calibrated_max_mv for the 100% point.
-        uint32_t max_v = g_app_context.status.calibrated_max_mv;
-        int newBattPct = map(constrain(mv, 3300, max_v), 3300, max_v, 0, 100);
-        
-        // Heuristic: If reading is above 4130mV on a 1S battery, it's physically 
-        // impossible unless a charger is applying 5V to the rail.
-        bool charging = (mv > 4130);
+        // Calculate a stable displayed percentage from filtered voltage.
+        uint32_t max_v = constrain(g_app_context.status.calibrated_max_mv, 4000u, 4200u);
+        int instantBattPct = map((int)constrain((int)mv, 3300, (int)max_v), 3300, (int)max_v, 0, 100);
+        const float pct_alpha = in_transition ? pct_alpha_transition : pct_alpha_normal;
+        if (filtered_pct < 0.0f) filtered_pct = (float)instantBattPct;
+        filtered_pct += ((float)instantBattPct - filtered_pct) * pct_alpha;
+        int newBattPct = constrain((int)(filtered_pct + 0.5f), 0, 100);
 
         if (!sd_card_ready() && millis() - sd_retry_ms > 5000) {
             if (!g_app_context.capture.pcap_active && 
@@ -482,7 +490,7 @@ void status_service_task(void *pv) {
         float tsens_out = 0;
         if (temp_handle) temperature_sensor_get_celsius(temp_handle, &tsens_out);
 
-        write_status_snapshot(sd_card_ready(), newBattPct, charging, mv, (int)tsens_out);
+        write_status_snapshot(sd_card_ready(), newBattPct, charging_state, mv, (int)tsens_out);
         vTaskDelay(pdMS_TO_TICKS(500)); // Sample twice as fast for better responsiveness
     }
 }
