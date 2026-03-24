@@ -48,5 +48,5 @@ extern void cb_nav_scan(lv_event_t *e);
 extern void cb_net_selected(lv_event_t *e);
 extern void cb_pause_scan(lv_event_t *e);
 extern void cb_view_ap(lv_event_t *e), cb_view_sta(lv_event_t *e), cb_view_linked(lv_event_t *e);
-extern void cb_start_reconnect_test(lv_event_t *e), cb_start_beacon(lv_event_t *e), cb_start_pmkid(lv_event_t *e), cb_stop_audit_action(lv_event_t *e);
+extern void cb_start_reconnect_test(lv_event_t *e), cb_start_beacon(lv_event_t *e), cb_start_pmkid(lv_event_t *e), cb_start_pmkid_deauth(lv_event_t *e), cb_stop_audit_action(lv_event_t *e);
 extern void cb_toggle_ble_adv_test(lv_event_t *e), cb_toggle_ble_scan(lv_event_t *e), cb_toggle_pcap(lv_event_t *e), cb_toggle_probes(lv_event_t *e);

@@ -19,7 +19,7 @@ lv_obj_t *tab_home, *tab_scan, *tab_audit, *tab_ble, *tab_pcap, *tab_probes, *ta
 lv_obj_t *scan_list, *lbl_scan_count, *btn_scan_pause, *lbl_scan_pause;
 lv_obj_t *btn_view_ap, *btn_view_sta, *btn_view_linked;
 lv_obj_t *lbl_audit_target, *lbl_audit_bssid, *lbl_audit_status;
-lv_obj_t *btn_reconnect, *btn_beacon, *btn_pmkid, *btn_stop_audit;
+lv_obj_t *btn_reconnect, *btn_beacon, *btn_pmkid, *btn_pmkid_deauth, *btn_stop_audit;
 lv_obj_t *lbl_ble_status;
 lv_obj_t *lbl_pcap_ch;
 lv_obj_t *btn_pcap_lock;
@@ -515,7 +515,8 @@ void ui_build() {
   int y=62;
   btn_reconnect = make_action_btn(tab_audit, LV_SYMBOL_WARNING   " RECONNECT TEST", &style_btn_red,   0xFF4444, cb_start_reconnect_test, y); y += 42;
   btn_beacon = make_action_btn(tab_audit, LV_SYMBOL_AUDIO     " BEACON LOAD",  &style_btn_orange, 0xFFAA00, cb_start_beacon, y); y += 42;
-  btn_pmkid = make_action_btn(tab_audit, LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE", &style_btn_blue,  0x00AAFF, cb_start_pmkid, y);
+  btn_pmkid = make_action_btn(tab_audit, LV_SYMBOL_EYE_OPEN  " PMKID CAPTURE", &style_btn_blue,  0x00AAFF, cb_start_pmkid, y); y += 42;
+  btn_pmkid_deauth = make_action_btn(tab_audit, LV_SYMBOL_WARNING " PMKID + DEAUTH", &style_btn_blue, 0x00AAFF, cb_start_pmkid_deauth, y);
   btn_stop_audit = lv_btn_create(tab_audit);
   lv_obj_set_size(btn_stop_audit, SCREEN_W - (UI::Layout::Margin * 2), UI::Layout::ButtonHeight); 
   lv_obj_align(btn_stop_audit, LV_ALIGN_BOTTOM_MID, 0, -52);

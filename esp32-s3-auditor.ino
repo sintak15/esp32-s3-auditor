@@ -64,6 +64,7 @@ extern lv_obj_t *lbl_audit_target;
 extern lv_obj_t *lbl_audit_bssid;
 extern lv_obj_t *lbl_audit_status;
 extern lv_obj_t *btn_stop_audit;
+extern lv_obj_t *btn_pmkid_deauth;
 extern lv_obj_t *lbl_firmware_version;
 extern lv_obj_t *lbl_build_date;
 extern lv_obj_t *lbl_device_id;
@@ -873,6 +874,7 @@ void cb_net_selected(lv_event_t *e) {
     lv_obj_clear_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(btn_pmkid_deauth, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 
     navigate_to(2);
@@ -1011,6 +1013,70 @@ void cb_start_pmkid(lv_event_t*) {
     lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
 }
+
+void cb_start_pmkid_deauth(lv_event_t*) {
+    if (g_app_context.wifi_scan.selected_net < 0) return;
+    if (g_app_context.audit.current_mode & (AUDIT_PMKID | AUDIT_RECONNECT)) return;
+
+    CompanionStatus cst = {};
+    if (!companion_read_status(&cst)) {
+        lv_label_set_text(lbl_audit_status, "#FF4444 Companion not found#");
+        return;
+    }
+
+    // --- Start PMKID portion ---
+    g_app_context.audit.pmkid_found = false;
+    g_app_context.audit.pmkid_via_companion = true;
+    memset(g_app_context.audit.pmkid_value, 0, sizeof(g_app_context.audit.pmkid_value));
+    memset(g_app_context.audit.pmkid_sta_mac, 0, sizeof(g_app_context.audit.pmkid_sta_mac));
+    memset(g_app_context.audit.pmkid_target_ssid, 0, sizeof(g_app_context.audit.pmkid_target_ssid));
+    memset(g_app_context.audit.pmkid_target_bssid, 0, sizeof(g_app_context.audit.pmkid_target_bssid));
+
+    uint8_t target_bssid[6] = {0};
+    uint8_t target_channel = 1;
+    char target_ssid[33] = {0};
+
+    if (g_app_context.wifi_scan.mutex && xSemaphoreTake(g_app_context.wifi_scan.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (g_app_context.wifi_scan.selected_net >= 0 && g_app_context.wifi_scan.selected_net < g_app_context.wifi_scan.ap_count) {
+            APRecord& ap = g_app_context.wifi_scan.ap_list[g_app_context.wifi_scan.selected_net];
+            memcpy(target_bssid, ap.bssid, 6);
+            target_channel = ap.channel;
+            strncpy(target_ssid, ap.ssid, 32);
+            target_ssid[32] = '\0';
+        }
+        xSemaphoreGive(g_app_context.wifi_scan.mutex);
+    }
+
+    memcpy(g_app_context.audit.pmkid_target_bssid, target_bssid, 6);
+    g_app_context.audit.pmkid_target_channel = target_channel;
+    strncpy(g_app_context.audit.pmkid_target_ssid, target_ssid, sizeof(g_app_context.audit.pmkid_target_ssid) - 1);
+    g_app_context.audit.pmkid_target_ssid[sizeof(g_app_context.audit.pmkid_target_ssid) - 1] = '\0';
+
+    g_app_context.audit.current_mode |= AUDIT_PMKID;
+    g_app_context.audit.pmkid_timer = lv_timer_create(pmkid_tick, 500, &g_app_context);
+
+    companion_stop_all();
+    companion_clear_result();
+    if (!companion_set_target(target_channel, target_bssid) || !companion_start_pmkid()) {
+        lv_label_set_text(lbl_audit_status, "#FF4444 Companion not responding#");
+        stop_audit_action(&g_app_context);
+        return;
+    }
+
+    // --- Start Deauth portion ---
+    set_promiscuous_channel(target_channel);
+    g_app_context.audit.current_mode |= AUDIT_RECONNECT;
+    g_app_context.audit.reconnect_timer = lv_timer_create(reconnect_tick, 50, &g_app_context);
+
+    // --- Update UI ---
+    lv_label_set_text(lbl_audit_status, "#00AAFF PMKID + DEAUTH ACTIVE#\nWaiting for handshake...");
+    lv_obj_add_flag(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(btn_beacon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(btn_pmkid_deauth, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN);
+}
+
 
 void cb_stop_audit_action(lv_event_t*) { stop_audit_action(&g_app_context); }
 

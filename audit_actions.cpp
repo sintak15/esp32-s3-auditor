@@ -10,7 +10,7 @@
 #include <nvs_flash.h>
 
 // LVGL object forward declarations
-extern lv_obj_t *btn_reconnect, *btn_beacon, *btn_pmkid, *btn_stop_audit;
+extern lv_obj_t *btn_reconnect, *btn_beacon, *btn_pmkid, *btn_pmkid_deauth, *btn_stop_audit;
 extern lv_obj_t *lbl_audit_status;
 
 static AppContext* audit_context = nullptr;
@@ -126,6 +126,7 @@ static void show_audit_buttons(bool show) {
     f(btn_reconnect, LV_OBJ_FLAG_HIDDEN);
     f(btn_beacon, LV_OBJ_FLAG_HIDDEN);
     f(btn_pmkid, LV_OBJ_FLAG_HIDDEN);
+    f(btn_pmkid_deauth, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_stop_audit, LV_OBJ_FLAG_HIDDEN); // Always hide stop button when returning to idle
 }
 
